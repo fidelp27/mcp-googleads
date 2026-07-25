@@ -1,0 +1,10 @@
+.git
+.venv
+__pycache__
+*.pyc
+.env
+*.json
+ad_images
+generated
+tests
+docs

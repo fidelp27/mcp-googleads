@@ -1,0 +1,11 @@
+# MCP requirements
+mcp[cli]>=1.12.0
+pydantic>=2.0
+
+# Google API requirements
+google-auth>=2.25.2
+google-auth-oauthlib>=1.1.0
+requests>=2.31.0
+
+# Environment configuration
+python-dotenv>=1.0.0

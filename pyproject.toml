@@ -1,0 +1,48 @@
+[project]
+name = "fidel-google-ads-mcp"
+version = "0.1.0"
+description = "Extensible Google Ads integration for the Model Context Protocol (MCP)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Fidel"}
+]
+keywords = ["mcp", "google ads", "automation", "analytics", "reporting"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+    "Topic :: Software Development :: Libraries :: Python Modules"
+]
+dependencies = [
+    "google-auth>=2.25.2",
+    "google-auth-oauthlib>=1.2.1",
+    "mcp[cli]>=1.12.0",
+    "pydantic>=2.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+fidel-google-ads-mcp = "google_ads_server:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["google_ads_server"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
