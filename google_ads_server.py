@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger('google_ads_server')
 
 mcp = FastMCP(
-    "fidel-google-ads-mcp",
+    "google-ads-mcp",
     instructions=(
         "Analyze Google Ads accounts and campaigns. Start with server_status, "
         "then list_accounts, and use the account ID returned by that tool."
@@ -120,7 +120,7 @@ def server_status() -> Dict[str, Any]:
             issues.append("The OAuth credentials file is not valid JSON")
 
     return {
-        "server": "fidel-google-ads-mcp",
+        "server": "google-ads-mcp",
         "ready": not issues,
         "auth_type": auth_type,
         "credentials_configured": bool(credentials_path and credentials_path.exists()),
@@ -1592,7 +1592,7 @@ async def list_resources(
 
 def main() -> None:
     """Run the server locally over stdio or remotely over Streamable HTTP."""
-    parser = argparse.ArgumentParser(description="Fidel Google Ads MCP server")
+    parser = argparse.ArgumentParser(description="Google Ads MCP server")
     parser.add_argument(
         "--transport",
         choices=("stdio", "streamable-http"),

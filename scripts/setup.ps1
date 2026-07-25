@@ -8,7 +8,7 @@ $venvPath = Join-Path $projectRoot ".venv"
 $venvPython = Join-Path $venvPath "Scripts\python.exe"
 $generatedPath = Join-Path $projectRoot "generated"
 $launcherPath = Join-Path $projectRoot "scripts\run_stdio.ps1"
-$serverExecutable = Join-Path $venvPath "Scripts\fidel-google-ads-mcp.exe"
+$serverExecutable = Join-Path $venvPath "Scripts\google-ads-mcp.exe"
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
     python -m venv $venvPath
@@ -24,7 +24,7 @@ if ($ProductionOnly) {
 New-Item -ItemType Directory -Force -Path $generatedPath | Out-Null
 $config = @{
     mcpServers = @{
-        fidelGoogleAds = @{
+        googleAdsMcp = @{
             command = "powershell.exe"
             args = @(
                 "-NoProfile",
@@ -38,7 +38,7 @@ $config = @{
 }
 $config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $generatedPath "claude_desktop_config.snippet.json") -Encoding utf8
 $codexSnippet = @"
-[mcp_servers.fidel_google_ads]
+[mcp_servers.google_ads_mcp]
 enabled = true
 command = '$serverExecutable'
 args = ["--transport", "stdio"]

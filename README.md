@@ -1,4 +1,4 @@
-# Fidel Google Ads MCP
+# Google Ads MCP
 
 Servidor MCP independiente para consultar y analizar Google Ads desde clientes compatibles. Expone herramientas para cuentas, campañas, anuncios, creatividades, assets y consultas GAQL.
 
@@ -56,7 +56,7 @@ Para un servidor remoto se recomienda una cuenta de servicio o generar el token 
 
 ## Claude Desktop
 
-La instalación genera [claude_desktop_config.snippet.json](generated/claude_desktop_config.snippet.json) con rutas absolutas para esta máquina. Copia la entrada `fidelGoogleAds` dentro de `mcpServers` en:
+La instalación genera [claude_desktop_config.snippet.json](generated/claude_desktop_config.snippet.json) con rutas absolutas para esta máquina. Copia la entrada `googleAdsMcp` dentro de `mcpServers` en:
 
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
@@ -66,7 +66,7 @@ Configuración equivalente:
 ```json
 {
   "mcpServers": {
-    "fidelGoogleAds": {
+    "googleAdsMcp": {
       "command": "powershell.exe",
       "args": [
         "-NoProfile",
@@ -87,9 +87,9 @@ Reinicia Claude Desktop. Ejecuta primero `server_status`; debe devolver `"ready"
 Agrega esta entrada a `C:\Users\TU_USUARIO\.codex\config.toml` en Windows:
 
 ```toml
-[mcp_servers.fidel_google_ads]
+[mcp_servers.google_ads_mcp]
 enabled = true
-command = 'C:\RUTA\AL\PROYECTO\.venv\Scripts\fidel-google-ads-mcp.exe'
+command = 'C:\RUTA\AL\PROYECTO\.venv\Scripts\google-ads-mcp.exe'
 args = ["--transport", "stdio"]
 cwd = 'C:\RUTA\AL\PROYECTO'
 startup_timeout_sec = 30
@@ -122,10 +122,10 @@ Para un despliegue público no uses el modo sin autenticación. La ruta recomend
 ### Docker
 
 ```bash
-docker build -t fidel-google-ads-mcp .
+docker build -t google-ads-mcp .
 docker run --rm -p 8000:8000 --env-file .env \
   -v /ruta/segura:/run/secrets:ro \
-  fidel-google-ads-mcp
+  google-ads-mcp
 ```
 
 Configura las rutas de credenciales de `.env` para que apunten al volumen montado, por ejemplo `/run/secrets/google_ads_token.json`.
@@ -135,13 +135,13 @@ Configura las rutas de credenciales de `.env` para que apunten al volumen montad
 Local por `stdio`:
 
 ```bash
-fidel-google-ads-mcp --transport stdio
+google-ads-mcp --transport stdio
 ```
 
 Remoto por HTTP:
 
 ```bash
-fidel-google-ads-mcp --transport streamable-http --host 0.0.0.0 --port 8000
+google-ads-mcp --transport streamable-http --host 0.0.0.0 --port 8000
 ```
 
 ## Herramientas

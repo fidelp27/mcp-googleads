@@ -46,7 +46,7 @@ async def test_stdio_transport_lists_tools():
             assert tools["download_image_asset"].annotations.readOnlyHint is False
             status = await session.call_tool("server_status")
             assert status.isError is False
-            assert "fidel-google-ads-mcp" in str(status.content)
+            assert "google-ads-mcp" in str(status.content)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Claude launcher is Windows-specific")
@@ -119,7 +119,7 @@ async def test_streamable_http_transport_lists_tools():
                 assert tools["download_image_asset"].annotations.readOnlyHint is False
                 status = await session.call_tool("server_status")
                 assert status.isError is False
-                assert "fidel-google-ads-mcp" in str(status.content)
+                assert "google-ads-mcp" in str(status.content)
     finally:
         process.terminate()
         try:

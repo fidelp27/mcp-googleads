@@ -1,5 +1,5 @@
 [project]
-name = "fidel-google-ads-mcp"
+name = "google-ads-mcp"
 version = "0.1.0"
 description = "Extensible Google Ads integration for the Model Context Protocol (MCP)"
 readme = "README.md"
@@ -34,7 +34,7 @@ dev = [
 ]
 
 [project.scripts]
-fidel-google-ads-mcp = "google_ads_server:main"
+google-ads-mcp = "google_ads_server:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
