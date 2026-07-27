@@ -1,0 +1,23 @@
+{
+  "local_search": {
+    "channel_type": "SEARCH",
+    "bidding_strategy": "MANUAL_CPC",
+    "geo_targets": ["2032"],
+    "language_codes": ["1003"]
+  },
+  "ecommerce_pmax": {
+    "channel_type": "PERFORMANCE_MAX",
+    "bidding_strategy": "MAXIMIZE_CONVERSION_VALUE",
+    "geo_targets": ["2032"],
+    "language_codes": ["1003"],
+    "extra": {
+      "urlExpansionOptOut": false
+    }
+  },
+  "awareness_display": {
+    "channel_type": "DISPLAY",
+    "bidding_strategy": "MAXIMIZE_CONVERSIONS",
+    "geo_targets": ["2032"],
+    "language_codes": ["1003"]
+  }
+}

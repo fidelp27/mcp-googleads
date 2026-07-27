@@ -1,0 +1,17 @@
+{
+  "preset_ar": {
+    "geo_targets": ["2032"],
+    "language_codes": ["1003"],
+    "currency": "ARS"
+  },
+  "preset_es": {
+    "geo_targets": ["2724"],
+    "language_codes": ["1003"],
+    "currency": "EUR"
+  },
+  "preset_mx": {
+    "geo_targets": ["2484"],
+    "language_codes": ["1003"],
+    "currency": "MXN"
+  }
+}

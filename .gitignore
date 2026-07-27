@@ -55,3 +55,6 @@ google_ads_token.json
 
 uv.lock
 generated/
+
+# Agency runtime state
+data/

@@ -1,0 +1,10 @@
+{
+  "1234567890": {
+    "name": "Example client",
+    "industry": "Local services",
+    "agency_contact": "account.manager@example.com",
+    "branding": {
+      "primary_color": "#1A73E8"
+    }
+  }
+}

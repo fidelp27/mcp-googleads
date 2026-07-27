@@ -5,6 +5,7 @@ from pydantic import Field
 import os
 import json
 import requests
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -18,6 +19,8 @@ import logging
 # MCP
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from agency.governance import audited_tool
+from agency.config import get_settings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -86,6 +89,7 @@ def http_post(url: str, **kwargs):
 
 
 @mcp.tool(annotations=READ_ONLY_TOOL)
+@audited_tool
 def server_status() -> Dict[str, Any]:
     """Check server readiness without exposing credential values or secrets."""
     issues = []
@@ -119,6 +123,15 @@ def server_status() -> Dict[str, Any]:
         except (OSError, json.JSONDecodeError):
             issues.append("The OAuth credentials file is not valid JSON")
 
+    agency_settings = get_settings()
+    agency_warnings = []
+    if not agency_settings.read_only_mode and not agency_settings.allowed_customer_ids:
+        agency_warnings.append(
+            "Write mode is enabled without ALLOWED_CUSTOMER_IDS"
+        )
+    if agency_settings.operator_name == "unknown":
+        agency_warnings.append("OPERATOR_NAME is not configured")
+
     return {
         "server": "google-ads-mcp",
         "ready": not issues,
@@ -128,6 +141,14 @@ def server_status() -> Dict[str, Any]:
         "login_customer_configured": bool(GOOGLE_ADS_LOGIN_CUSTOMER_ID),
         "oauth_token_present": oauth_token_present,
         "google_ads_api_version": API_VERSION,
+        "agency": {
+            "operator_configured": agency_settings.operator_name != "unknown",
+            "read_only_mode": agency_settings.read_only_mode,
+            "allowed_customer_count": len(agency_settings.allowed_customer_ids),
+            "blocked_tool_count": len(agency_settings.blocked_tools),
+            "client_approval_required": agency_settings.client_approval_required,
+            "warnings": agency_warnings,
+        },
         "issues": issues,
     }
 
@@ -208,6 +229,33 @@ def get_service_account_credentials():
         logger.error(f"Error loading service account credentials: {str(e)}")
         raise
 
+
+def refresh_credentials_with_retry(creds, attempts: int = 3):
+    """Refresh OAuth credentials with bounded exponential backoff."""
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            creds.refresh(Request())
+            if getattr(creds, "expiry", None):
+                remaining = creds.expiry - datetime.utcnow()
+                if remaining <= timedelta(minutes=10):
+                    logger.warning("OAuth access token expires in less than 10 minutes")
+            return creds
+        except RefreshError as error:
+            last_error = error
+            logger.warning(
+                "OAuth refresh attempt %s/%s failed: %s",
+                attempt + 1,
+                attempts,
+                error,
+            )
+            if attempt < attempts - 1:
+                time.sleep(2**attempt)
+        except Exception:
+            logger.exception("Unexpected OAuth refresh failure")
+            raise
+    raise RefreshError(f"OAuth token refresh failed after {attempts} attempts: {last_error}")
+
 def get_oauth_credentials():
     """Get and refresh OAuth user credentials."""
     creds = None
@@ -246,7 +294,7 @@ def get_oauth_credentials():
         if creds and creds.expired and creds.refresh_token:
             try:
                 logger.info("Refreshing expired token")
-                creds.refresh(Request())
+                refresh_credentials_with_retry(creds)
                 logger.info("Token successfully refreshed")
             except RefreshError as e:
                 logger.warning(f"Error refreshing token: {str(e)}, will try to get new token")
@@ -312,7 +360,7 @@ def get_headers(creds):
             if creds.expired and creds.refresh_token:
                 try:
                     logger.info("Refreshing expired OAuth token in get_headers")
-                    creds.refresh(Request())
+                    refresh_credentials_with_retry(creds)
                     logger.info("Token successfully refreshed in get_headers")
                 except RefreshError as e:
                     logger.error(f"Error refreshing token in get_headers: {str(e)}")
@@ -337,6 +385,7 @@ def get_headers(creds):
     return headers
 
 @mcp.tool(annotations=READ_ONLY_TOOL)
+@audited_tool
 async def list_accounts() -> str:
     """
     Lists all accessible Google Ads accounts.
@@ -376,6 +425,7 @@ async def list_accounts() -> str:
         return f"Error listing accounts: {str(e)}"
 
 @mcp.tool(annotations=READ_ONLY_TOOL)
+@audited_tool
 async def execute_gaql_query(
     customer_id: str = Field(description="Google Ads customer ID (10 digits, no dashes). Example: '9873186703'"),
     query: str = Field(description="Valid GAQL query string following Google Ads Query Language syntax")
@@ -449,6 +499,7 @@ async def execute_gaql_query(
         return f"Error executing GAQL query: {str(e)}"
 
 @mcp.tool(annotations=READ_ONLY_TOOL)
+@audited_tool
 async def get_campaign_performance(
     customer_id: str = Field(description="Google Ads customer ID (10 digits, no dashes). Example: '9873186703'"),
     days: int = Field(default=30, description="Number of days to look back (7, 30, 90, etc.)")
@@ -495,6 +546,7 @@ async def get_campaign_performance(
     return await execute_gaql_query(customer_id, query)
 
 @mcp.tool(annotations=READ_ONLY_TOOL)
+@audited_tool
 async def get_ad_performance(
     customer_id: str = Field(description="Google Ads customer ID (10 digits, no dashes). Example: '9873186703'"),
     days: int = Field(default=30, description="Number of days to look back (7, 30, 90, etc.)")
@@ -542,6 +594,7 @@ async def get_ad_performance(
     return await execute_gaql_query(customer_id, query)
 
 @mcp.tool(annotations=READ_ONLY_TOOL)
+@audited_tool
 async def run_gaql(
     customer_id: str = Field(description="Google Ads customer ID (10 digits, no dashes). Example: '9873186703'"),
     query: str = Field(description="Valid GAQL query string following Google Ads Query Language syntax"),
@@ -699,6 +752,7 @@ async def run_gaql(
         return f"Error executing GAQL query: {str(e)}"
 
 @mcp.tool(annotations=READ_ONLY_TOOL)
+@audited_tool
 async def get_ad_creatives(
     customer_id: str = Field(description="Google Ads customer ID (10 digits, no dashes). Example: '9873186703'")
 ) -> str:
@@ -797,6 +851,7 @@ async def get_ad_creatives(
         return f"Error retrieving ad creatives: {str(e)}"
 
 @mcp.tool(annotations=READ_ONLY_TOOL)
+@audited_tool
 async def get_account_currency(
     customer_id: str = Field(description="Google Ads customer ID (10 digits, no dashes). Example: '9873186703'")
 ) -> str:
@@ -1013,6 +1068,7 @@ def gaql_help() -> str:
     """
 
 @mcp.tool(annotations=READ_ONLY_TOOL)
+@audited_tool
 async def get_image_assets(
     customer_id: str = Field(description="Google Ads customer ID (10 digits, no dashes). Example: '9873186703'"),
     limit: int = Field(default=50, description="Maximum number of image assets to return")
@@ -1104,6 +1160,7 @@ async def get_image_assets(
         return f"Error retrieving image assets: {str(e)}"
 
 @mcp.tool(annotations=LOCAL_WRITE_TOOL)
+@audited_tool
 async def download_image_asset(
     customer_id: str = Field(description="Google Ads customer ID (10 digits, no dashes). Example: '9873186703'"),
     asset_id: str = Field(description="The ID of the image asset to download"),
@@ -1214,6 +1271,7 @@ async def download_image_asset(
         return f"Error downloading image asset: {str(e)}"
 
 @mcp.tool(annotations=READ_ONLY_TOOL)
+@audited_tool
 async def get_asset_usage(
     customer_id: str = Field(description="Google Ads customer ID (10 digits, no dashes). Example: '9873186703'"),
     asset_id: str = Field(default=None, description="Optional: specific asset ID to look up (leave empty to get all image assets)"),
@@ -1403,6 +1461,7 @@ async def get_asset_usage(
         return f"Error retrieving asset usage: {str(e)}"
 
 @mcp.tool(annotations=READ_ONLY_TOOL)
+@audited_tool
 async def analyze_image_assets(
     customer_id: str = Field(description="Google Ads customer ID (10 digits, no dashes). Example: '9873186703'"),
     days: int = Field(default=30, description="Number of days to look back (7, 30, 90, etc.)")
@@ -1545,6 +1604,7 @@ async def analyze_image_assets(
         return f"Error analyzing image assets: {str(e)}"
 
 @mcp.tool(annotations=READ_ONLY_TOOL)
+@audited_tool
 async def list_resources(
     customer_id: Optional[str] = Field(
         default=None,
@@ -1589,6 +1649,11 @@ async def list_resources(
         return "\n".join(lines)
     except Exception as error:
         return f"Error retrieving Google Ads resources: {error}"
+
+from agency import register_agency_tools
+
+register_agency_tools(mcp)
+
 
 def main() -> None:
     """Run the server locally over stdio or remotely over Streamable HTTP."""

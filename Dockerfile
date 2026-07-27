@@ -8,7 +8,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md LICENSE google_ads_server.py ./
+COPY pyproject.toml README.md DESIGN.md LICENSE google_ads_server.py ./
+COPY agency ./agency
+COPY config ./config
+COPY docs ./docs
 RUN python -m pip install --no-cache-dir .
 
 EXPOSE 8000

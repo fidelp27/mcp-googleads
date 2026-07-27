@@ -1,6 +1,6 @@
 [project]
 name = "google-ads-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Extensible Google Ads integration for the Model Context Protocol (MCP)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -42,6 +42,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["google_ads_server"]
+
+[tool.setuptools.packages.find]
+include = ["agency*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

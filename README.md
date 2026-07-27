@@ -1,29 +1,23 @@
 # Google Ads MCP
 
-Servidor MCP independiente para consultar, auditar y analizar cuentas de Google Ads desde Claude, ChatGPT, Codex y cualquier cliente compatible con Model Context Protocol.
+Servidor MCP de operación para agencias: consulta, audita, crea y administra cuentas de Google Ads desde Claude, ChatGPT, Codex y cualquier cliente compatible con Model Context Protocol.
 
-El proyecto ofrece herramientas listas para usar y acceso flexible a Google Ads Query Language (GAQL). Puede ejecutarse localmente por `stdio` o publicarse mediante Streamable HTTP.
+Incluye 93 herramientas MCP, guardarraíles obligatorios, reporting white-label y soporte MCC. Puede ejecutarse localmente por `stdio` o publicarse mediante Streamable HTTP.
 
 ## Funcionalidades
 
-- Descubrimiento de cuentas de Google Ads accesibles.
-- Estado de configuración sin exponer tokens, secretos ni rutas sensibles.
-- Rendimiento de campañas y anuncios por rango de fechas.
-- Consulta de moneda de la cuenta para interpretar costos correctamente.
-- Ejecución de consultas GAQL personalizadas.
-- Resultados GAQL en tabla, JSON o CSV.
-- Auditoría de titulares, descripciones y URLs de anuncios.
-- Inventario y descarga local de imágenes publicitarias.
-- Identificación del uso de assets en campañas y grupos de anuncios.
-- Análisis de impresiones, clics y conversiones por imagen.
-- Exploración de recursos válidos mediante `GoogleAdsFieldService`.
-- OAuth con persistencia y renovación de tokens.
-- Autenticación no interactiva mediante cuenta de servicio.
+- Lectura completa de campañas, anuncios, keywords, search terms, conversiones, geo, dispositivos, horarios, audiencias, presupuestos e historial.
+- Ciclo de vida de campañas Search, Performance Max y Display.
+- Presupuestos, estrategias de puja, bids, segmentación geográfica y schedules.
+- Ad groups, RSA, call ads, asset groups PMax, keywords y negativas.
+- Audiencias, Customer Match con confirmación de consentimiento, assets y extensiones.
+- Recomendaciones oficiales, conversion actions y operaciones MCC.
+- Reportes por cliente, dashboard de agencia, comparación de períodos, waste, optimización y alertas.
+- Templates, presets regionales y branding configurable.
+- Auditoría append-only, dry-run real, approvals, whitelist, caps, bloqueo por herramienta e idempotencia.
 - Transportes MCP `stdio` y Streamable HTTP.
-- Imagen Docker y scripts de instalación, autorización y prueba real.
-- Timeouts configurables y validación de IDs, límites y rangos.
 
-El servidor actualmente consulta datos y no modifica campañas, presupuestos ni anuncios. La única herramienta que escribe es `download_image_asset`, y lo hace exclusivamente en el disco local.
+Las escrituras están bloqueadas por defecto con `READ_ONLY_MODE=true`. Cuando se habilitan, ninguna mutation se ejecuta directamente: primero debe validarse con `dry_run=true`, Google Ads recibe `validateOnly=true` y el servidor emite un `approval_id`. La ejecución exige repetir exactamente el payload con `dry_run=false`.
 
 ## Compatibilidad
 
@@ -200,34 +194,55 @@ La prueba lista cuentas accesibles, obtiene la moneda y consulta siete días de 
 | `MCP_TRANSPORT` | No | `stdio` o `streamable-http`. |
 | `MCP_HOST` | No | Dirección HTTP; valor predeterminado: `127.0.0.1`. |
 | `MCP_PORT` | No | Puerto HTTP; valor predeterminado: `8000`. |
+| `OPERATOR_NAME` | Sí para agencia | Identidad incluida en cada entrada de auditoría. |
+| `GOOGLE_ADS_DATA_DIR` | No | Carpeta local para auditoría, approvals y contexto. |
+| `READ_ONLY_MODE` | Sí | `true` bloquea todas las mutations; es el valor inicial recomendado. |
+| `ALLOWED_CUSTOMER_IDS` | Sí para escritura | Whitelist separada por comas; debe incluir MCC y clientes permitidos. |
+| `BLOCKED_TOOLS` | No | Herramientas deshabilitadas para esta instancia u operador. |
+| `MAX_DAILY_BUDGET_INCREASE_MICROS` | Sí para escritura | Aumento absoluto máximo por operación, en micros de la moneda de la cuenta. |
+| `MAX_BUDGET_INCREASE_PCT` | Sí para escritura | Aumento porcentual que dispara o limita cambios grandes. |
+| `MAX_BID_MICROS` | Sí para escritura | Bid máximo permitido. |
+| `GOOGLE_ADS_RATE_LIMIT_PER_MINUTE` | No | Límite local por cuenta. |
+| `APPROVAL_TTL_MINUTES` | No | Vigencia de un preview validado. |
+| `CLIENT_APPROVAL_REQUIRED` | No | Exige aprobación cliente-side antes de ejecutar. |
+| `AUDIT_RETENTION_DAYS` | No | Política operativa de conservación del log. |
 
 ## Herramientas MCP
 
-| Herramienta | Qué hace | Escritura |
-|---|---|---|
-| `server_status` | Comprueba credenciales, tipo de autenticación y versión sin revelar secretos. | No |
-| `list_accounts` | Lista los IDs de Google Ads accesibles por las credenciales. | No |
-| `get_account_currency` | Devuelve la moneda predeterminada de una cuenta. | No |
-| `get_campaign_performance` | Resume impresiones, clics, conversiones y costos por campaña. | No |
-| `get_ad_performance` | Resume rendimiento a nivel de anuncio. | No |
-| `get_ad_creatives` | Recupera titulares, descripciones, estados y URLs. | No |
-| `execute_gaql_query` | Ejecuta una consulta GAQL y devuelve resultados formateados. | No |
-| `run_gaql` | Ejecuta GAQL con salida `table`, `json` o `csv`. | No |
-| `get_image_assets` | Lista imágenes y sus URLs en tamaño completo. | No |
-| `download_image_asset` | Descarga una imagen en un directorio local. | Solo disco local |
-| `get_asset_usage` | Muestra dónde se utiliza un asset por ID y tipo. | No |
-| `analyze_image_assets` | Cruza imágenes con impresiones, clics y conversiones. | No |
-| `list_resources` | Lista recursos válidos para cláusulas `FROM` de GAQL. | No |
+| Dominio | Capacidades |
+|---|---|
+| Lectura | Cuentas, campañas, ads, keywords, search terms, geo, dispositivos, horarios, audiencias, conversiones, cambios, bids, presupuestos y shared sets. |
+| Campañas | Crear Search/PMax/Display, clonar, actualizar, pausar, habilitar, remover, geo y schedule. |
+| Estructura | Presupuestos, ad groups, RSA, call ads, asset groups PMax y templates. |
+| Keywords | Altas batch, bids, estados, negativas individuales/bulk y listas compartidas. |
+| Audiencias | Targeting/observation, modifiers y Customer Match. |
+| Assets | Sitelinks, callouts, snippets, llamadas, imágenes y links a campañas. |
+| Optimización | Recomendaciones de Google, waste detection, alertas y planes accionables. |
+| Agencia | Reportes white-label, dashboard consolidado, comparación de períodos y MCC. |
+| Governance | Auditoría, approvals, aprobación cliente-side, rechazo y reversión soportada. |
 
 Los rangos `days` aceptan entre 1 y 365 días. Los costos de Google Ads se reciben en micros: `1.000.000` micros equivale a una unidad de la moneda de la cuenta.
 
-### Flujo recomendado
+Los runbooks completos están en:
+
+- `docs/campaigns.md`
+- `docs/keywords.md`
+- `docs/guardrails.md`
+- `docs/agency-playbook.md`
+- `docs/client-facing.md`
+
+También están disponibles como recursos MCP bajo `agency://docs/{domain}`.
+
+### Flujo seguro de escritura
 
 1. Ejecuta `server_status`.
-2. Ejecuta `list_accounts`.
-3. Usa `get_account_currency` con la cuenta elegida.
-4. Consulta rendimiento, creatividades o assets.
-5. Usa `run_gaql` cuando necesites dimensiones o métricas no cubiertas por las herramientas preparadas.
+2. Ejecuta `get_client_context` y confirma cliente, moneda y campañas.
+3. Reúne evidencia con herramientas de lectura.
+4. Llama la herramienta de escritura con `dry_run=true`.
+5. Revisa el cliente, payload, caps y resultado de `validateOnly`.
+6. Si corresponde, registra la aprobación del cliente con `approve_operation`.
+7. Repite exactamente la llamada con `dry_run=false`, `approval_id` y `confirmation_text`.
+8. Conserva el `audit_id` y verifica el estado con una herramienta de lectura.
 
 Ejemplos de pedidos para el asistente:
 

@@ -1,0 +1,9 @@
+{
+  "defaults": {
+    "max_daily_spend_micros": 100000000,
+    "min_ctr": 0.01,
+    "max_ctr_drop_pct": 30,
+    "max_cpa_micros": 25000000,
+    "max_waste_micros": 10000000
+  }
+}
