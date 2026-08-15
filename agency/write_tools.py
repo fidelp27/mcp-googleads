@@ -1161,9 +1161,14 @@ def _register_ad_tools(mcp) -> None:
             f"customers/{ensure_customer_allowed(customer_id)}/adGroupAds/"
             f"{_id(ad_group_id, 'ad_group_id')}~{_id(ad_id, 'ad_id')}"
         )
-        operation = _update_operation(
-            {"resourceName": resource_name, "status": status}, ["status"]
-        )
+        # AdGroupAd forbids setting status=REMOVED via update; deletion must use
+        # a remove operation. ENABLED/PAUSED remain valid status updates.
+        if status == "REMOVED":
+            operation = {"remove": resource_name}
+        else:
+            operation = _update_operation(
+                {"resourceName": resource_name, "status": status}, ["status"]
+            )
         return _write(
             tool, customer_id, "adGroupAds", [operation], dry_run, approval_id,
             confirmation_text, expected_confirmation=resource_name if confirm else None,
