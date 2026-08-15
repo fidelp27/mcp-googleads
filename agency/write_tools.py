@@ -90,7 +90,6 @@ def _campaign_context(customer_id: str, campaign_id: str | int) -> dict[str, Any
                campaign.bidding_strategy_type,
                campaign.target_cpa.target_cpa_micros,
                campaign.target_roas.target_roas,
-               campaign.start_date, campaign.end_date,
                campaign.campaign_budget,
                campaign_budget.id, campaign_budget.name,
                campaign_budget.amount_micros
@@ -154,7 +153,7 @@ def _campaign_create(
     channel_type: str,
     bidding_strategy: str,
     target_value: float | None,
-    start_date: str,
+    start_date: str | None,
     end_date: str | None,
     status: str,
     force_enable: bool,
@@ -184,7 +183,9 @@ def _campaign_create(
         "status": effective_status,
         "advertisingChannelType": channel_type,
         "campaignBudget": _resource(customer_id, "campaignBudgets", budget_id),
-        "startDate": start_date.replace("-", ""),
+        # Required by Google Ads API v25+. Advertisers must declare EU political
+        # advertising status; standard commercial campaigns do not contain it.
+        "containsEuPoliticalAdvertising": "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
         **bidding,
     }
     if channel_type in {"SEARCH", "DISPLAY"}:
@@ -194,8 +195,12 @@ def _campaign_create(
             "targetContentNetwork": channel_type == "DISPLAY",
             "targetPartnerSearchNetwork": False,
         }
+    # Google Ads REST expects ISO dates (YYYY-MM-DD). start_date is optional and
+    # defaults to the campaign creation date when omitted, so only send it when given.
+    if start_date:
+        campaign["startDate"] = start_date
     if end_date:
-        campaign["endDate"] = end_date.replace("-", "")
+        campaign["endDate"] = end_date
     if extra:
         campaign.update(extra)
     return campaign
@@ -338,7 +343,7 @@ def _register_campaign_tools(mcp) -> None:
             channel,
             bidding_strategy,
             target_value,
-            start_date or date.today().isoformat(),
+            start_date,
             end_date,
             status,
             force_enable,
@@ -983,13 +988,14 @@ def _register_ad_group_tools(mcp) -> None:
         confirm: bool,
     ) -> str:
         before = _ad_group_context(customer_id, ad_group_id)["adGroup"]
-        operation = _update_operation(
-            {
-                "resourceName": _resource(customer_id, "adGroups", ad_group_id),
-                "status": status,
-            },
-            ["status"],
-        )
+        resource = _resource(customer_id, "adGroups", ad_group_id)
+        # REMOVED is not a settable status via update; deletion needs a remove op.
+        if status == "REMOVED":
+            operation = {"remove": resource}
+        else:
+            operation = _update_operation(
+                {"resourceName": resource, "status": status}, ["status"]
+            )
         return _write(
             tool, customer_id, "adGroups", [operation], dry_run, approval_id,
             confirmation_text,
@@ -1156,9 +1162,14 @@ def _register_ad_tools(mcp) -> None:
             f"customers/{ensure_customer_allowed(customer_id)}/adGroupAds/"
             f"{_id(ad_group_id, 'ad_group_id')}~{_id(ad_id, 'ad_id')}"
         )
-        operation = _update_operation(
-            {"resourceName": resource_name, "status": status}, ["status"]
-        )
+        # AdGroupAd forbids setting status=REMOVED via update; deletion must use
+        # a remove operation. ENABLED/PAUSED remain valid status updates.
+        if status == "REMOVED":
+            operation = {"remove": resource_name}
+        else:
+            operation = _update_operation(
+                {"resourceName": resource_name, "status": status}, ["status"]
+            )
         return _write(
             tool, customer_id, "adGroupAds", [operation], dry_run, approval_id,
             confirmation_text, expected_confirmation=resource_name if confirm else None,
@@ -1348,9 +1359,13 @@ def _register_keyword_tools(mcp) -> None:
             f"customers/{ensure_customer_allowed(customer_id)}/adGroupCriteria/"
             f"{_id(ad_group_id, 'ad_group_id')}~{_id(criterion_id, 'criterion_id')}"
         )
-        operation = _update_operation(
-            {"resourceName": resource_name, "status": status}, ["status"]
-        )
+        # REMOVED is not a settable status via update; deletion needs a remove op.
+        if status == "REMOVED":
+            operation = {"remove": resource_name}
+        else:
+            operation = _update_operation(
+                {"resourceName": resource_name, "status": status}, ["status"]
+            )
         return _write(
             tool, customer_id, "adGroupCriteria", [operation], dry_run,
             approval_id, confirmation_text,

@@ -94,12 +94,14 @@ def request(
     raise RuntimeError(f"Google Ads request failed: {last_error}")
 
 
-def search(customer_id: str, query: str, page_size: int = 10000) -> list[dict[str, Any]]:
+def search(customer_id: str, query: str) -> list[dict[str, Any]]:
     customer_id = ensure_customer_allowed(customer_id)
     results: list[dict[str, Any]] = []
     page_token: str | None = None
     while True:
-        body: dict[str, Any] = {"query": query, "pageSize": min(page_size, 10000)}
+        # The REST googleAds:search endpoint fixes page size at 10000 rows and
+        # rejects an explicit pageSize with PAGE_SIZE_NOT_SUPPORTED.
+        body: dict[str, Any] = {"query": query}
         if page_token:
             body["pageToken"] = page_token
         response = request(
