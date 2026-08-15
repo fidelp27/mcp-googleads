@@ -90,7 +90,6 @@ def _campaign_context(customer_id: str, campaign_id: str | int) -> dict[str, Any
                campaign.bidding_strategy_type,
                campaign.target_cpa.target_cpa_micros,
                campaign.target_roas.target_roas,
-               campaign.start_date, campaign.end_date,
                campaign.campaign_budget,
                campaign_budget.id, campaign_budget.name,
                campaign_budget.amount_micros
