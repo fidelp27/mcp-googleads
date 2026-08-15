@@ -540,9 +540,13 @@ def _register_campaign_tools(mcp) -> None:
         confirmation_text: Optional[str] = None,
     ) -> str:
         """Update allowed campaign fields; bidding changes require exact-name confirmation."""
-        allowed = {"name", "status", "end_date", "bidding_strategy", "target_value"}
+        allowed = {"name", "status", "bidding_strategy", "target_value"}
         unknown = set(updates) - allowed
         if unknown:
+            if "end_date" in unknown:
+                raise ValueError(
+                    "Google Ads API v25 removed campaign end_date; it cannot be set here"
+                )
             raise ValueError(f"Unsupported campaign updates: {sorted(unknown)}")
         context = _campaign_context(customer_id, campaign_id)
         campaign_before = context["campaign"]
@@ -558,9 +562,6 @@ def _register_campaign_tools(mcp) -> None:
                 str(updates["status"]), "status", {"ENABLED", "PAUSED"}
             )
             mask.append("status")
-        if "end_date" in updates:
-            resource["endDate"] = str(updates["end_date"]).replace("-", "")
-            mask.append("end_date")
         if "bidding_strategy" in updates:
             bidding = _bidding_fields(
                 str(updates["bidding_strategy"]), updates.get("target_value")
@@ -607,13 +608,14 @@ def _register_campaign_tools(mcp) -> None:
             expected_text = str(campaign.get("name"))
         else:
             expected_text = None
-        operation = _update_operation(
-            {
-                "resourceName": _resource(customer_id, "campaigns", campaign_id),
-                "status": status,
-            },
-            ["status"],
-        )
+        resource = _resource(customer_id, "campaigns", campaign_id)
+        # REMOVED is not a settable status via update; deletion needs a remove op.
+        if status == "REMOVED":
+            operation = {"remove": resource}
+        else:
+            operation = _update_operation(
+                {"resourceName": resource, "status": status}, ["status"]
+            )
         return _write(
             tool, customer_id, "campaigns", [operation], dry_run, approval_id,
             confirmation_text, expected_confirmation=expected_text,
