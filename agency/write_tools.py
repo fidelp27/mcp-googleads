@@ -927,7 +927,7 @@ def _register_ad_group_tools(mcp) -> None:
         create: dict[str, Any] = {
             "campaign": _resource(customer_id, "campaigns", campaign_id),
             "name": name.strip(),
-            "status": "PAUSED" if status.upper() != "ENABLED" else "PAUSED",
+            "status": "ENABLED" if status.upper() == "ENABLED" else "PAUSED",
             "type": type.strip().upper(),
         }
         if cpc_bid_micros is not None:
