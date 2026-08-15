@@ -988,13 +988,14 @@ def _register_ad_group_tools(mcp) -> None:
         confirm: bool,
     ) -> str:
         before = _ad_group_context(customer_id, ad_group_id)["adGroup"]
-        operation = _update_operation(
-            {
-                "resourceName": _resource(customer_id, "adGroups", ad_group_id),
-                "status": status,
-            },
-            ["status"],
-        )
+        resource = _resource(customer_id, "adGroups", ad_group_id)
+        # REMOVED is not a settable status via update; deletion needs a remove op.
+        if status == "REMOVED":
+            operation = {"remove": resource}
+        else:
+            operation = _update_operation(
+                {"resourceName": resource, "status": status}, ["status"]
+            )
         return _write(
             tool, customer_id, "adGroups", [operation], dry_run, approval_id,
             confirmation_text,
@@ -1358,9 +1359,13 @@ def _register_keyword_tools(mcp) -> None:
             f"customers/{ensure_customer_allowed(customer_id)}/adGroupCriteria/"
             f"{_id(ad_group_id, 'ad_group_id')}~{_id(criterion_id, 'criterion_id')}"
         )
-        operation = _update_operation(
-            {"resourceName": resource_name, "status": status}, ["status"]
-        )
+        # REMOVED is not a settable status via update; deletion needs a remove op.
+        if status == "REMOVED":
+            operation = {"remove": resource_name}
+        else:
+            operation = _update_operation(
+                {"resourceName": resource_name, "status": status}, ["status"]
+            )
         return _write(
             tool, customer_id, "adGroupCriteria", [operation], dry_run,
             approval_id, confirmation_text,
