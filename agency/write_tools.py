@@ -154,7 +154,7 @@ def _campaign_create(
     channel_type: str,
     bidding_strategy: str,
     target_value: float | None,
-    start_date: str,
+    start_date: str | None,
     end_date: str | None,
     status: str,
     force_enable: bool,
@@ -184,7 +184,9 @@ def _campaign_create(
         "status": effective_status,
         "advertisingChannelType": channel_type,
         "campaignBudget": _resource(customer_id, "campaignBudgets", budget_id),
-        "startDate": start_date.replace("-", ""),
+        # Required by Google Ads API v25+. Advertisers must declare EU political
+        # advertising status; standard commercial campaigns do not contain it.
+        "containsEuPoliticalAdvertising": "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
         **bidding,
     }
     if channel_type in {"SEARCH", "DISPLAY"}:
@@ -194,8 +196,12 @@ def _campaign_create(
             "targetContentNetwork": channel_type == "DISPLAY",
             "targetPartnerSearchNetwork": False,
         }
+    # Google Ads REST expects ISO dates (YYYY-MM-DD). start_date is optional and
+    # defaults to the campaign creation date when omitted, so only send it when given.
+    if start_date:
+        campaign["startDate"] = start_date
     if end_date:
-        campaign["endDate"] = end_date.replace("-", "")
+        campaign["endDate"] = end_date
     if extra:
         campaign.update(extra)
     return campaign
@@ -338,7 +344,7 @@ def _register_campaign_tools(mcp) -> None:
             channel,
             bidding_strategy,
             target_value,
-            start_date or date.today().isoformat(),
+            start_date,
             end_date,
             status,
             force_enable,
