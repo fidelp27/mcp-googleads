@@ -29,6 +29,7 @@ get_geo_performance get_device_performance get_time_of_day_performance
 get_audience_performance get_conversion_actions get_conversion_performance
 get_change_history get_bidding_strategies get_budget_utilization get_shared_sets
 get_enhanced_conversions_status get_ad_strength_diagnostics
+get_impression_share_losses
 create_campaign_budget update_campaign_budget create_search_campaign
 create_pmax_campaign create_display_campaign update_campaign pause_campaign
 enable_campaign remove_campaign copy_campaign update_campaign_geo_targets
@@ -61,6 +62,8 @@ def _tool_domain(tool_name: str) -> str:
         "generate_keyword_forecast", "find_geo_target_constants",
     }:
         return "keyword-planner"
+    if tool_name == "get_impression_share_losses":
+        return "reporting-mcc"
     if any(token in tool_name for token in ("campaign", "budget", "ad_group", "ad_")):
         return "campaigns"
     if any(token in tool_name for token in ("keyword", "search_term", "waste")):

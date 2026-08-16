@@ -552,6 +552,233 @@ def _account_ad_recommendations(
     return out
 
 
+def _summarize_impression_share(*, rows: list[dict], level: str, days: int) -> dict:
+    """Turn campaign/ad_group rows into an IS-losses report with a diagnosis label.
+
+    Pure function so unit tests can exercise every diagnosis without a live API.
+    Google returns share fields in [0, 1]; missing fields mean the metric is
+    not eligible (usually because impressions were below the reporting threshold).
+    """
+    units: list[dict] = []
+    counter = {
+        "healthy": 0,
+        "budget_limited": 0,
+        "rank_limited": 0,
+        "mixed": 0,
+        "not_serving": 0,
+        "insufficient_data": 0,
+    }
+    for row in rows:
+        metrics = row.get("metrics", {}) or {}
+        campaign = row.get("campaign", {}) or {}
+        ad_group = row.get("adGroup", {}) or {}
+
+        impressions = int(metrics.get("impressions") or 0)
+        clicks = int(metrics.get("clicks") or 0)
+        cost_micros = int(metrics.get("costMicros") or 0)
+
+        is_impr = _to_share(metrics.get("searchImpressionShare"))
+        is_budget = _to_share(metrics.get("searchBudgetLostImpressionShare"))
+        is_rank = _to_share(metrics.get("searchRankLostImpressionShare"))
+        is_top = _to_share(metrics.get("searchTopImpressionShare"))
+        is_budget_top = _to_share(metrics.get("searchBudgetLostTopImpressionShare"))
+        is_rank_top = _to_share(metrics.get("searchRankLostTopImpressionShare"))
+        is_abs_top = _to_share(metrics.get("searchAbsoluteTopImpressionShare"))
+        is_budget_abs = _to_share(metrics.get("searchBudgetLostAbsoluteTopImpressionShare"))
+        is_rank_abs = _to_share(metrics.get("searchRankLostAbsoluteTopImpressionShare"))
+
+        diagnosis, message = _diagnose_impression_share(
+            impressions=impressions,
+            is_impr=is_impr,
+            is_budget=is_budget,
+            is_rank=is_rank,
+            level=level,
+        )
+        counter[diagnosis] += 1
+
+        unit = {
+            "campaign": {"id": campaign.get("id"), "name": campaign.get("name")},
+            "metrics": {
+                "window_days": days,
+                "impressions": impressions,
+                "clicks": clicks,
+                "cost_micros": cost_micros,
+            },
+            "impression_share": {
+                "current": is_impr,
+                "top": is_top,
+                "absolute_top": is_abs_top,
+            },
+            "losses": {
+                "budget": {
+                    "any": is_budget,
+                    "top": is_budget_top,
+                    "absolute_top": is_budget_abs,
+                },
+                "rank": {
+                    "any": is_rank,
+                    "top": is_rank_top,
+                    "absolute_top": is_rank_abs,
+                },
+            },
+            "diagnosis": {"code": diagnosis, "message": message},
+        }
+        if level == "ad_group":
+            unit["ad_group"] = {"id": ad_group.get("id"), "name": ad_group.get("name")}
+            unit["status"] = ad_group.get("status")
+        else:
+            unit["status"] = row.get("campaign", {}).get("status")
+            unit["channel_type"] = row.get("campaign", {}).get("advertisingChannelType")
+        units.append(unit)
+
+    recommendations = _is_account_recommendations(counter, len(units), level)
+    return {
+        "period_days": days,
+        "level": level,
+        "summary": {
+            "total_units": len(units),
+            "diagnosis_counts": counter,
+        },
+        "units": units,
+        "recommendations": recommendations,
+    }
+
+
+def _to_share(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(f, 4)
+
+
+def _diagnose_impression_share(
+    *,
+    impressions: int,
+    is_impr: float | None,
+    is_budget: float | None,
+    is_rank: float | None,
+    level: str,
+) -> tuple[str, str]:
+    if impressions == 0 and (is_impr is None or is_impr == 0):
+        if is_rank is not None and is_rank > 0:
+            # Rank-lost even without impressions means eligible auctions but always outranked
+            return (
+                "rank_limited",
+                "Eligible for auctions but always outranked; not serving because bids or "
+                "Ad Rank are too low.",
+            )
+        return (
+            "not_serving",
+            "No impressions and no reported eligibility in the window.",
+        )
+    if is_impr is None:
+        return (
+            "insufficient_data",
+            "Google did not report Impression Share for this unit; usually means volume was too low.",
+        )
+    if is_impr >= 0.9:
+        return (
+            "healthy",
+            f"Impression Share {round(is_impr * 100, 1)}% — very little upside to unlock.",
+        )
+    budget = is_budget if is_budget is not None else 0.0
+    rank = is_rank if is_rank is not None else 0.0
+    if level == "ad_group" and is_budget is None:
+        # Budget IS is not available at ad_group level in v25.
+        if rank > 0.2:
+            return (
+                "rank_limited",
+                f"Losing {round(rank * 100, 1)}% of impressions to Ad Rank at ad_group level.",
+            )
+        return (
+            "insufficient_data",
+            "Budget-lost IS is only available at campaign level; check the parent campaign for the budget-vs-rank split.",
+        )
+    if budget >= 0.2 and rank >= 0.2 and abs(budget - rank) < 0.1:
+        return (
+            "mixed",
+            f"Losing {round(budget * 100, 1)}% to budget and {round(rank * 100, 1)}% to rank — both need attention.",
+        )
+    if budget > rank and budget >= 0.1:
+        return (
+            "budget_limited",
+            f"Losing {round(budget * 100, 1)}% of impressions to budget vs {round(rank * 100, 1)}% to rank.",
+        )
+    if rank > budget and rank >= 0.1:
+        return (
+            "rank_limited",
+            f"Losing {round(rank * 100, 1)}% of impressions to Ad Rank vs {round(budget * 100, 1)}% to budget.",
+        )
+    return (
+        "healthy",
+        f"Impression Share {round(is_impr * 100, 1)}% with balanced small losses (budget {round(budget * 100, 1)}%, rank {round(rank * 100, 1)}%).",
+    )
+
+
+def _is_account_recommendations(counter: dict, total: int, level: str) -> list[dict]:
+    if total == 0:
+        return [
+            {
+                "severity": "info",
+                "code": "NO_UNITS",
+                "message": "No campaigns or ad groups matched the filter.",
+            }
+        ]
+    out: list[dict] = []
+    if counter["budget_limited"]:
+        out.append(
+            {
+                "severity": "high",
+                "code": "BUDGET_LIMITED_PRESENT",
+                "message": (
+                    f"{counter['budget_limited']}/{total} units are budget-limited. Raise budgets or reallocate before touching bids."
+                ),
+            }
+        )
+    if counter["rank_limited"]:
+        out.append(
+            {
+                "severity": "high",
+                "code": "RANK_LIMITED_PRESENT",
+                "message": (
+                    f"{counter['rank_limited']}/{total} units are rank-limited. Address Quality Score, bids or creative before adding budget."
+                ),
+            }
+        )
+    if counter["mixed"]:
+        out.append(
+            {
+                "severity": "warning",
+                "code": "MIXED_LIMITED",
+                "message": (
+                    f"{counter['mixed']}/{total} units lose comparable share to both budget and rank; requires both fixes."
+                ),
+            }
+        )
+    if counter["not_serving"]:
+        out.append(
+            {
+                "severity": "warning",
+                "code": "NOT_SERVING_UNITS",
+                "message": (
+                    f"{counter['not_serving']}/{total} units did not serve in the window; verify they are eligible."
+                ),
+            }
+        )
+    if counter["healthy"] == total:
+        out.append(
+            {
+                "severity": "info",
+                "code": "ALL_HEALTHY",
+                "message": "All units have IS ≥ 90% or balanced small losses.",
+            }
+        )
+    return out
+
+
 def register_read_tools(mcp) -> None:
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
@@ -714,6 +941,80 @@ def register_read_tools(mcp) -> None:
             ORDER BY conversion_action.name
         """
         return _run("get_conversion_actions", customer_id, query)
+
+    @mcp.tool(annotations=READ_ONLY)
+    @audited_tool
+    def get_impression_share_losses(
+        customer_id: str = Field(description="Google Ads customer ID"),
+        days: int = Field(default=30, description="Lookback window 1-365"),
+        level: str = Field(
+            default="campaign",
+            description="Aggregation level: 'campaign' (default) or 'ad_group'",
+        ),
+        campaign_id: Optional[str] = Field(
+            default=None,
+            description="Optional filter — only meaningful for ad_group level",
+        ),
+    ) -> str:
+        """Return Search Impression Share losses per unit with automatic budget-limited / rank-limited diagnosis."""
+        ensure_tool_allowed("get_impression_share_losses")
+        cid = ensure_customer_allowed(customer_id)
+        lvl = (level or "").strip().lower()
+        if lvl not in {"campaign", "ad_group"}:
+            raise ValueError("level must be 'campaign' or 'ad_group'")
+
+        if lvl == "campaign":
+            query = f"""
+                SELECT
+                  campaign.id, campaign.name, campaign.status,
+                  campaign.advertising_channel_type,
+                  metrics.impressions, metrics.clicks, metrics.cost_micros,
+                  metrics.search_impression_share,
+                  metrics.search_budget_lost_impression_share,
+                  metrics.search_rank_lost_impression_share,
+                  metrics.search_top_impression_share,
+                  metrics.search_budget_lost_top_impression_share,
+                  metrics.search_rank_lost_top_impression_share,
+                  metrics.search_absolute_top_impression_share,
+                  metrics.search_budget_lost_absolute_top_impression_share,
+                  metrics.search_rank_lost_absolute_top_impression_share
+                FROM campaign
+                WHERE {_date_clause(days)}
+                  AND campaign.status != 'REMOVED'
+                ORDER BY metrics.cost_micros DESC
+            """
+        else:
+            filters = [_date_clause(days), "ad_group.status != 'REMOVED'"]
+            if campaign_id:
+                filters.append(f"campaign.id = {_id(campaign_id, 'campaign_id')}")
+            query = f"""
+                SELECT
+                  campaign.id, campaign.name,
+                  ad_group.id, ad_group.name, ad_group.status,
+                  metrics.impressions, metrics.clicks,
+                  metrics.search_impression_share,
+                  metrics.search_rank_lost_impression_share,
+                  metrics.search_top_impression_share,
+                  metrics.search_rank_lost_top_impression_share,
+                  metrics.search_absolute_top_impression_share,
+                  metrics.search_rank_lost_absolute_top_impression_share
+                FROM ad_group
+                WHERE {' AND '.join(filters)}
+                ORDER BY metrics.impressions DESC
+            """
+        rows = search(cid, query)
+        report = _summarize_impression_share(rows=rows, level=lvl, days=days)
+        return format_json({
+            "customer_id": cid,
+            "tool": "get_impression_share_losses",
+            "fresh": True,
+            "filter": {
+                "level": lvl,
+                "campaign_id": campaign_id,
+                "days": days,
+            },
+            **report,
+        })
 
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool

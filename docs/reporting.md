@@ -5,6 +5,49 @@ crudos (geo, ad group, anuncio) a nombres legibles para tus reportes.
 
 ---
 
+## Diagnóstico de Impression Share
+
+`get_impression_share_losses(customer_id, days=30, level="campaign"|"ad_group", campaign_id?)` clasifica cada unidad como `healthy` / `budget_limited` / `rank_limited` / `mixed` / `not_serving` / `insufficient_data` — ahorra armar el GAQL a mano cada vez.
+
+Ejecutar antes de tocar bids o pedir un aumento de presupuesto: si la pérdida es de rank, subir presupuesto no cambia nada.
+
+### Diferencias por nivel
+
+- **`campaign`** (default): expone las 9 métricas de la familia IS (`impression_share`, `budget_lost` y `rank_lost`, cada una × `top` / `absolute_top`).
+- **`ad_group`**: sólo `impression_share` + `rank_lost` + top/abs_top variantes. Google **no** expone `budget_lost` a nivel ad_group; para saber si el problema es de budget, mirar la campaña padre.
+
+### Códigos de diagnóstico
+
+| Código | Significado |
+|---|---|
+| `healthy` | IS ≥ 90% o pérdidas mínimas balanceadas. |
+| `budget_limited` | Pérdida de budget > rank y ≥ 10%. Subir presupuesto es el fix. |
+| `rank_limited` | Pérdida de rank > budget y ≥ 10%. Revisar Quality Score, bids, creativos. |
+| `mixed` | Pérdidas parejas a budget y rank (ambas ≥ 20%). Requiere ambos fixes. |
+| `not_serving` | 0 impresiones y sin eligibilidad reportada. Verificar aprobación/estado. |
+| `insufficient_data` | Volumen debajo del umbral de reporting de Google. |
+
+### Recomendaciones a nivel cuenta
+
+| Código | Cuándo |
+|---|---|
+| `BUDGET_LIMITED_PRESENT` | ≥1 unidad budget_limited. |
+| `RANK_LIMITED_PRESENT` | ≥1 unidad rank_limited. |
+| `MIXED_LIMITED` | ≥1 unidad mixed. |
+| `NOT_SERVING_UNITS` | ≥1 unidad no serving. |
+| `ALL_HEALTHY` | 100% healthy. |
+| `NO_UNITS` | Filtro no devolvió unidades. |
+
+### Ejemplo (Clariola)
+
+```text
+get_impression_share_losses(customer_id="5461642152", days=30, level="campaign")
+```
+
+Devuelve 2 unidades, 1 rank_limited (87.5% pérdida a rank en la campaña activa) + 1 not_serving.
+
+---
+
 ## 1. Esquema de UTMs
 
 El tracking se configura como **Final URL suffix a nivel campaña** (campo
