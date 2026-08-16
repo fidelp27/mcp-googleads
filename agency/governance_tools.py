@@ -78,6 +78,60 @@ def register_governance_tools(mcp) -> None:
 
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
+    def list_expiring_approvals(
+        minutes_until_expiry: int = 15,
+    ) -> str:
+        """List pending approvals that will expire within `minutes_until_expiry`.
+
+        Approvals expire after APPROVAL_TTL_MINUTES (default 60) — this tool
+        surfaces the ones about to hit the wall so the operator can execute or
+        request a fresh dry-run before the current one is dropped. Sorted by
+        the shortest time remaining first.
+        """
+        if minutes_until_expiry < 0:
+            raise ValueError("minutes_until_expiry must be >= 0")
+        now = datetime.now(timezone.utc)
+        soon = now + timedelta(minutes=minutes_until_expiry)
+        expiring: list[dict[str, Any]] = []
+        for item in approvals().values():
+            if item.get("status") != "pending":
+                continue
+            try:
+                expires_at = datetime.fromisoformat(item["expires_at"])
+            except (KeyError, ValueError, TypeError):
+                continue
+            if expires_at > soon:
+                continue
+            remaining = expires_at - now
+            expiring.append(
+                {
+                    "approval_id": item.get("approval_id"),
+                    "tool_name": item.get("tool_name"),
+                    "customer_id": item.get("customer_id"),
+                    "client_name": item.get("client_name"),
+                    "operator": item.get("operator"),
+                    "created_at": item.get("created_at"),
+                    "expires_at": item.get("expires_at"),
+                    "seconds_until_expiry": int(remaining.total_seconds()),
+                    "already_expired": remaining.total_seconds() < 0,
+                    "expected_confirmation": item.get("expected_confirmation"),
+                    "client_approval_required": item.get("client_approval_required"),
+                    "client_approved": item.get("client_approved"),
+                }
+            )
+        expiring.sort(key=lambda x: x["seconds_until_expiry"])
+        return format_json(
+            {
+                "as_of": now.isoformat(),
+                "minutes_until_expiry": minutes_until_expiry,
+                "count": len(expiring),
+                "already_expired_count": sum(1 for e in expiring if e["already_expired"]),
+                "approvals": expiring,
+            }
+        )
+
+    @mcp.tool(annotations=READ_ONLY)
+    @audited_tool
     def list_pending_client_approvals(min_age_minutes: int = 0) -> str:
         """List changes specifically waiting for client-side approval."""
         return format_json(pending(min_age_minutes, client_only=True))
