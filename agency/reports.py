@@ -157,9 +157,7 @@ def _report_data(
         recommendations = search(
             customer_id,
             """
-            SELECT recommendation.resource_name, recommendation.type,
-                   recommendation.impact.base_metrics,
-                   recommendation.impact.potential_metrics
+            SELECT recommendation.resource_name, recommendation.type
             FROM recommendation
             LIMIT 20
             """,
