@@ -51,6 +51,213 @@ def _run(tool_name: str, customer_id: str, query: str) -> str:
     )
 
 
+def _summarize_enhanced_conversions(
+    *,
+    customer_id: str,
+    customer_rows: list[dict],
+    action_rows: list[dict],
+    metric_rows: list[dict],
+    days: int,
+) -> dict:
+    """Turn raw GAQL rows into an Enhanced Conversions readiness report.
+
+    Kept as a pure function so it can be tested without touching Google Ads.
+    """
+    # ----- customer-level tracking setup -----
+    tracking: dict = {
+        "conversion_tracking_id": None,
+        "status": None,
+        "google_ads_conversion_customer": None,
+        "accepted_customer_data_terms": None,
+        "enhanced_conversions_for_leads_enabled": None,
+    }
+    customer_name = None
+    if customer_rows:
+        customer = customer_rows[0].get("customer", {}) or {}
+        customer_name = customer.get("descriptiveName")
+        setting = customer.get("conversionTrackingSetting", {}) or {}
+        tracking["conversion_tracking_id"] = setting.get("conversionTrackingId")
+        tracking["status"] = setting.get("conversionTrackingStatus")
+        tracking["google_ads_conversion_customer"] = setting.get("googleAdsConversionCustomer")
+        tracking["accepted_customer_data_terms"] = setting.get("acceptedCustomerDataTerms")
+        tracking["enhanced_conversions_for_leads_enabled"] = setting.get(
+            "enhancedConversionsForLeadsEnabled"
+        )
+
+    # ----- per-action volume roll-up -----
+    volume_by_action: dict[str, dict] = {}
+    for row in metric_rows:
+        segments = row.get("segments", {}) or {}
+        metrics = row.get("metrics", {}) or {}
+        resource = segments.get("conversionAction")
+        if not resource:
+            continue
+        bucket = volume_by_action.setdefault(
+            resource,
+            {"all_conversions": 0.0, "conversions": 0.0, "conversions_value": 0.0},
+        )
+        bucket["all_conversions"] += float(metrics.get("allConversions") or 0)
+        bucket["conversions"] += float(metrics.get("conversions") or 0)
+        bucket["conversions_value"] += float(metrics.get("conversionsValue") or 0)
+
+    # ----- per-action projection -----
+    actions: list[dict] = []
+    for row in action_rows:
+        action = row.get("conversionAction", {}) or {}
+        attribution = action.get("attributionModelSettings", {}) or {}
+        resource_name = action.get("resourceName") or (
+            f"customers/{customer_id}/conversionActions/{action.get('id')}"
+            if action.get("id")
+            else None
+        )
+        volume = volume_by_action.get(resource_name, {})
+        actions.append(
+            {
+                "id": action.get("id"),
+                "name": action.get("name"),
+                "status": action.get("status"),
+                "type": action.get("type"),
+                "category": action.get("category"),
+                "origin": action.get("origin"),
+                "primary_for_goal": bool(action.get("primaryForGoal")),
+                "included_in_conversions_metric": bool(
+                    action.get("includeInConversionsMetric")
+                ),
+                "counting_type": action.get("countingType"),
+                "attribution_model": attribution.get("attributionModel"),
+                "data_driven_model_status": attribution.get("dataDrivenModelStatus"),
+                "click_through_lookback_days": _to_int(
+                    action.get("clickThroughLookbackWindowDays")
+                ),
+                "view_through_lookback_days": _to_int(
+                    action.get("viewThroughLookbackWindowDays")
+                ),
+                "metrics": {
+                    "window_days": days,
+                    "all_conversions": round(volume.get("all_conversions", 0.0), 4),
+                    "conversions": round(volume.get("conversions", 0.0), 4),
+                    "conversions_value": round(volume.get("conversions_value", 0.0), 4),
+                },
+            }
+        )
+
+    # ----- alerts -----
+    alerts: list[dict] = []
+    has_lead_action = any(a["category"] == "LEAD" for a in actions)
+    has_enabled_primary = any(
+        a["status"] == "ENABLED" and a["primary_for_goal"] for a in actions
+    )
+    total_conversions_30d = sum(a["metrics"]["conversions"] for a in actions)
+
+    if tracking["accepted_customer_data_terms"] is not True:
+        alerts.append(
+            {
+                "severity": "critical" if has_lead_action else "warning",
+                "code": "CUSTOMER_DATA_TERMS_NOT_ACCEPTED",
+                "message": (
+                    "Customer Data Terms not accepted. Enhanced Conversions and "
+                    "Customer Match cannot ingest data until accepted at "
+                    "Admin > Data manager."
+                ),
+            }
+        )
+    if has_lead_action and tracking["enhanced_conversions_for_leads_enabled"] is not True:
+        alerts.append(
+            {
+                "severity": "high",
+                "code": "EC4L_DISABLED_WITH_LEAD_ACTIONS",
+                "message": (
+                    "LEAD-category conversion actions exist but Enhanced "
+                    "Conversions for Leads is disabled at customer level."
+                ),
+            }
+        )
+    if not has_enabled_primary:
+        alerts.append(
+            {
+                "severity": "high",
+                "code": "NO_PRIMARY_FOR_GOAL",
+                "message": (
+                    "No ENABLED conversion action is marked primary_for_goal. "
+                    "Smart Bidding cannot optimize without a primary action."
+                ),
+            }
+        )
+    if total_conversions_30d == 0 and any(a["status"] == "ENABLED" for a in actions):
+        alerts.append(
+            {
+                "severity": "info",
+                "code": "NO_CONVERSIONS_IN_WINDOW",
+                "message": (
+                    f"Zero conversions recorded in the last {days} days across "
+                    "enabled actions. Verify tag firing and enhanced conversion "
+                    "payload before spend ramps up."
+                ),
+            }
+        )
+    for a in actions:
+        if a["primary_for_goal"] and a["data_driven_model_status"] not in {
+            None,
+            "AVAILABLE",
+        }:
+            alerts.append(
+                {
+                    "severity": "warning",
+                    "code": "DDA_NOT_AVAILABLE",
+                    "message": (
+                        f"Data-driven attribution not available for '{a['name']}' "
+                        f"({a['data_driven_model_status']}); Google will fall back to "
+                        "the model configured at account level."
+                    ),
+                }
+            )
+        if a["primary_for_goal"] and not a["included_in_conversions_metric"]:
+            alerts.append(
+                {
+                    "severity": "warning",
+                    "code": "PRIMARY_NOT_COUNTED",
+                    "message": (
+                        f"'{a['name']}' is primary_for_goal but "
+                        "include_in_conversions_metric is false; Smart Bidding "
+                        "will not use it."
+                    ),
+                }
+            )
+
+    summary = {
+        "total_actions": len(actions),
+        "enabled_actions": sum(1 for a in actions if a["status"] == "ENABLED"),
+        "primary_for_goal_actions": sum(1 for a in actions if a["primary_for_goal"]),
+        "actions_with_conversions": sum(
+            1 for a in actions if a["metrics"]["conversions"] > 0
+        ),
+        "lead_actions_present": has_lead_action,
+        "customer_data_terms_accepted": tracking["accepted_customer_data_terms"] is True,
+        "enhanced_conversions_for_leads_enabled": (
+            tracking["enhanced_conversions_for_leads_enabled"] is True
+        ),
+        "window_days": days,
+        "total_conversions_in_window": round(total_conversions_30d, 4),
+    }
+
+    return {
+        "customer_name": customer_name,
+        "tracking": tracking,
+        "conversion_actions": actions,
+        "alerts": alerts,
+        "summary": summary,
+    }
+
+
+def _to_int(value: str | int | None) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def register_read_tools(mcp) -> None:
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
@@ -213,6 +420,66 @@ def register_read_tools(mcp) -> None:
             ORDER BY conversion_action.name
         """
         return _run("get_conversion_actions", customer_id, query)
+
+    @mcp.tool(annotations=READ_ONLY)
+    @audited_tool
+    def get_enhanced_conversions_status(
+        customer_id: str = Field(description="Google Ads customer ID"),
+        days: int = Field(default=30, description="Lookback window 1-365"),
+    ) -> str:
+        """Audit Enhanced Conversions readiness: tracking setup, per-action config, 30d volume, alerts."""
+        ensure_tool_allowed("get_enhanced_conversions_status")
+        cid = ensure_customer_allowed(customer_id)
+
+        customer_query = """
+            SELECT customer.id, customer.descriptive_name,
+                   customer.conversion_tracking_setting.conversion_tracking_id,
+                   customer.conversion_tracking_setting.conversion_tracking_status,
+                   customer.conversion_tracking_setting.google_ads_conversion_customer,
+                   customer.conversion_tracking_setting.accepted_customer_data_terms,
+                   customer.conversion_tracking_setting.enhanced_conversions_for_leads_enabled
+            FROM customer
+        """
+        actions_query = """
+            SELECT conversion_action.id, conversion_action.name,
+                   conversion_action.status, conversion_action.type,
+                   conversion_action.category, conversion_action.origin,
+                   conversion_action.primary_for_goal,
+                   conversion_action.include_in_conversions_metric,
+                   conversion_action.counting_type,
+                   conversion_action.attribution_model_settings.attribution_model,
+                   conversion_action.attribution_model_settings.data_driven_model_status,
+                   conversion_action.click_through_lookback_window_days,
+                   conversion_action.view_through_lookback_window_days
+            FROM conversion_action
+            WHERE conversion_action.status != 'REMOVED'
+            ORDER BY conversion_action.name
+        """
+        metrics_query = f"""
+            SELECT segments.conversion_action, segments.conversion_action_name,
+                   segments.conversion_action_category,
+                   metrics.all_conversions, metrics.conversions, metrics.conversions_value
+            FROM campaign
+            WHERE {_date_clause(days)}
+        """
+
+        customer_rows = search(cid, customer_query)
+        action_rows = search(cid, actions_query)
+        metric_rows = search(cid, metrics_query)
+
+        report = _summarize_enhanced_conversions(
+            customer_id=cid,
+            customer_rows=customer_rows,
+            action_rows=action_rows,
+            metric_rows=metric_rows,
+            days=days,
+        )
+        return format_json({
+            "customer_id": cid,
+            "tool": "get_enhanced_conversions_status",
+            "fresh": True,
+            **report,
+        })
 
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
