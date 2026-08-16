@@ -540,7 +540,10 @@ def _register_campaign_tools(mcp) -> None:
         confirmation_text: Optional[str] = None,
     ) -> str:
         """Update allowed campaign fields; bidding changes require exact-name confirmation."""
-        allowed = {"name", "status", "bidding_strategy", "target_value"}
+        allowed = {
+            "name", "status", "bidding_strategy", "target_value",
+            "final_url_suffix", "tracking_url_template",
+        }
         unknown = set(updates) - allowed
         if unknown:
             if "end_date" in unknown:
@@ -562,6 +565,12 @@ def _register_campaign_tools(mcp) -> None:
                 str(updates["status"]), "status", {"ENABLED", "PAUSED"}
             )
             mask.append("status")
+        if "final_url_suffix" in updates:
+            resource["finalUrlSuffix"] = str(updates["final_url_suffix"])
+            mask.append("final_url_suffix")
+        if "tracking_url_template" in updates:
+            resource["trackingUrlTemplate"] = str(updates["tracking_url_template"])
+            mask.append("tracking_url_template")
         if "bidding_strategy" in updates:
             bidding = _bidding_fields(
                 str(updates["bidding_strategy"]), updates.get("target_value")
