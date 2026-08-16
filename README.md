@@ -215,6 +215,7 @@ La prueba lista cuentas accesibles, obtiene la moneda y consulta siete días de 
 | Campañas | Crear Search/PMax/Display, clonar, actualizar, pausar, habilitar, remover, geo y schedule. |
 | Estructura | Presupuestos, ad groups, RSA, call ads, asset groups PMax y templates. |
 | Keywords | Altas batch, bids, estados, negativas individuales/bulk y listas compartidas. |
+| Keyword Planner | Sugerencias, históricos, forecast y lookup de geo target constants (sin gastar presupuesto). |
 | Audiencias | Targeting/observation, modifiers y Customer Match. |
 | Assets | Sitelinks, callouts, snippets, llamadas, imágenes y links a campañas. |
 | Optimización | Recomendaciones de Google, waste detection, alertas y planes accionables. |
@@ -227,6 +228,7 @@ Los runbooks completos están en:
 
 - `docs/campaigns.md`
 - `docs/keywords.md`
+- `docs/keyword-planner.md`
 - `docs/guardrails.md`
 - `docs/agency-playbook.md`
 - `docs/client-facing.md`

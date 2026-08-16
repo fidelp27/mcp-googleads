@@ -11,6 +11,7 @@ from .config import PROJECT_ROOT, get_active_customer_id, get_settings
 DOCS = {
     "campaigns": "campaigns.md",
     "keywords": "keywords.md",
+    "keyword-planner": "keyword-planner.md",
     "guardrails": "guardrails.md",
     "agency-playbook": "agency-playbook.md",
     "client-transparency": "client-facing.md",
@@ -47,11 +48,18 @@ generate_optimization_plan list_client_accounts get_client_context
 switch_context run_across_clients get_audit_log get_pending_approvals
 revert_operation create_campaign_from_template check_alerts
 list_pending_client_approvals approve_operation reject_operation
+generate_keyword_ideas generate_keyword_historical_metrics
+generate_keyword_forecast find_geo_target_constants
 """.split()
 )
 
 
 def _tool_domain(tool_name: str) -> str:
+    if tool_name in {
+        "generate_keyword_ideas", "generate_keyword_historical_metrics",
+        "generate_keyword_forecast", "find_geo_target_constants",
+    }:
+        return "keyword-planner"
     if any(token in tool_name for token in ("campaign", "budget", "ad_group", "ad_")):
         return "campaigns"
     if any(token in tool_name for token in ("keyword", "search_term", "waste")):
