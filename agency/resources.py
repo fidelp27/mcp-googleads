@@ -30,7 +30,7 @@ get_audience_performance get_conversion_actions get_conversion_performance
 get_change_history get_bidding_strategies get_budget_utilization get_shared_sets
 get_enhanced_conversions_status get_ad_strength_diagnostics
 get_impression_share_losses check_consent_signal_coverage
-get_auction_insights
+get_auction_insights mcc_bulk_apply
 create_campaign_budget update_campaign_budget create_search_campaign
 create_pmax_campaign create_display_campaign update_campaign pause_campaign
 enable_campaign remove_campaign copy_campaign update_campaign_geo_targets
@@ -69,6 +69,8 @@ def _tool_domain(tool_name: str) -> str:
         return "conversions-recommendations"
     if tool_name == "get_auction_insights":
         return "reporting-mcc"
+    if tool_name == "mcc_bulk_apply":
+        return "agency-playbook"
     if any(token in tool_name for token in ("campaign", "budget", "ad_group", "ad_")):
         return "campaigns"
     if any(token in tool_name for token in ("keyword", "search_term", "waste")):
