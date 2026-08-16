@@ -5,6 +5,34 @@ crudos (geo, ad group, anuncio) a nombres legibles para tus reportes.
 
 ---
 
+## Auction Insights
+
+`get_auction_insights(customer_id, days=30, level="campaign"|"ad_group", campaign_id?)` devuelve la tabla de competidores por unidad — impression share, overlap, outranking, position above, top y absolute top — con head-to-head vs `You` y recomendaciones automáticas de amenaza.
+
+### Requisito de acceso
+
+Los metrics `auction_insight_*` de la Google Ads API v25 requieren que el **developer token** tenga acceso a esa familia. Es un permiso por token, no por cuenta. Si el token no lo tiene, la tool devuelve un objeto `error` con `code=METRIC_ACCESS_DENIED` y los pasos para solicitar acceso — nunca revienta.
+
+### Qué devuelve (con acceso)
+
+- **units:** por campaña o ad_group — competidores ordenados por impression share, con `metrics` promediados sobre las date-buckets del período y `head_to_head` extrayendo la fila `You` + el top competitor.
+- **recommendations:** por cada unidad donde algún competidor nos outranquea con `outranking_share ≥ 0.5`, emite `OUTRANKED_BY_COMPETITOR` (severidad high) listando hasta 3 dominios amenaza.
+- **summary:** `units`, `unique_competitors`.
+
+### Sin datos
+
+Cuando la query corre OK pero no hay auction insight rows (poco volumen, filtro sin match), devuelve `NO_AUCTION_INSIGHT_DATA` (info) explicando causas comunes.
+
+### Ejemplo
+
+```text
+get_auction_insights(customer_id="5461642152", days=30, level="campaign")
+```
+
+Con token restringido devuelve `METRIC_ACCESS_DENIED` estructurado. Con token con acceso, devuelve por campaña la lista de competidores con impression share promedio y flags cuando somos outranked.
+
+---
+
 ## Diagnóstico de Impression Share
 
 `get_impression_share_losses(customer_id, days=30, level="campaign"|"ad_group", campaign_id?)` clasifica cada unidad como `healthy` / `budget_limited` / `rank_limited` / `mixed` / `not_serving` / `insufficient_data` — ahorra armar el GAQL a mano cada vez.

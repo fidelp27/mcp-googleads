@@ -779,6 +779,205 @@ def _is_account_recommendations(counter: dict, total: int, level: str) -> list[d
     return out
 
 
+def _summarize_auction_insights(
+    *,
+    rows: list[dict],
+    level: str,
+    days: int,
+    campaign_id: str | None,
+) -> dict:
+    """Group auction-insight rows into per-unit competitor tables + head-to-head context.
+
+    Auction Insights come one row per (unit × competitor domain × date-segment). We
+    aggregate by (unit_key, domain) so callers get one line per competitor with
+    average impression share, overlap, outranking, etc. Pure function so unit
+    tests exercise every path.
+    """
+    units: dict[str, dict] = {}
+    metric_paths = (
+        ("impression_share", "auctionInsightSearchImpressionShare"),
+        ("absolute_top_impression_pct", "auctionInsightSearchAbsoluteTopImpressionPercentage"),
+        ("top_impression_pct", "auctionInsightSearchTopImpressionPercentage"),
+        ("outranking_share", "auctionInsightSearchOutrankingShare"),
+        ("overlap_rate", "auctionInsightSearchOverlapRate"),
+        ("position_above_rate", "auctionInsightSearchPositionAboveRate"),
+    )
+
+    for row in rows:
+        campaign = row.get("campaign", {}) or {}
+        ad_group = row.get("adGroup", {}) or {}
+        segments = row.get("segments", {}) or {}
+        metrics = row.get("metrics", {}) or {}
+        domain = segments.get("auctionInsightDomain")
+        if not domain:
+            continue
+
+        if level == "ad_group":
+            unit_id = ad_group.get("id")
+            unit_name = ad_group.get("name")
+            if not unit_id:
+                continue
+            key = f"ad_group:{unit_id}"
+        else:
+            unit_id = campaign.get("id")
+            unit_name = campaign.get("name")
+            if not unit_id:
+                continue
+            key = f"campaign:{unit_id}"
+
+        unit = units.setdefault(
+            key,
+            {
+                "campaign": {"id": campaign.get("id"), "name": campaign.get("name")},
+                "competitors": {},
+                "status": (
+                    ad_group.get("status") if level == "ad_group" else campaign.get("status")
+                ),
+            },
+        )
+        if level == "ad_group":
+            unit["ad_group"] = {"id": ad_group.get("id"), "name": ad_group.get("name")}
+
+        comp = unit["competitors"].setdefault(
+            domain,
+            {
+                "domain": domain,
+                "samples": 0,
+                "_totals": {k: 0.0 for k, _ in metric_paths},
+            },
+        )
+        comp["samples"] += 1
+        for out_key, api_key in metric_paths:
+            value = metrics.get(api_key)
+            if value is None:
+                continue
+            try:
+                comp["_totals"][out_key] += float(value)
+            except (TypeError, ValueError):
+                continue
+
+    # Flatten + rank competitors within each unit
+    unit_list: list[dict] = []
+    for unit in units.values():
+        competitors: list[dict] = []
+        for domain, comp in unit["competitors"].items():
+            samples = comp["samples"] or 1
+            averages = {
+                key: round(comp["_totals"][key] / samples, 4)
+                for key, _ in metric_paths
+            }
+            competitors.append(
+                {
+                    "domain": domain,
+                    "samples": comp["samples"],
+                    "metrics": averages,
+                }
+            )
+        # Rank by average impression share descending, "You" (self, i.e. the domain
+        # labelled 'You' or matching customer descriptive name) usually appears first
+        # via the SORT — Google returns your own row with `auction_insight_domain = "You"`.
+        competitors.sort(
+            key=lambda c: c["metrics"].get("impression_share") or 0.0, reverse=True
+        )
+        head_to_head = _auction_head_to_head(competitors)
+        unit_list.append(
+            {
+                "campaign": unit["campaign"],
+                **({"ad_group": unit["ad_group"]} if "ad_group" in unit else {}),
+                "status": unit["status"],
+                "competitor_count": len(competitors),
+                "competitors": competitors,
+                "head_to_head": head_to_head,
+            }
+        )
+
+    unit_list.sort(
+        key=lambda u: (
+            u["campaign"].get("name") or "",
+            (u.get("ad_group") or {}).get("name") or "",
+        )
+    )
+
+    if not unit_list:
+        return {
+            "period_days": days,
+            "level": level,
+            "summary": {"units": 0, "unique_competitors": 0},
+            "units": [],
+            "recommendations": [
+                {
+                    "severity": "info",
+                    "code": "NO_AUCTION_INSIGHT_DATA",
+                    "message": (
+                        "No auction-insight rows returned. Common causes: not enough "
+                        "impressions in the window, or the filter matched no units."
+                    ),
+                }
+            ],
+        }
+
+    unique_domains = {
+        c["domain"] for u in unit_list for c in u["competitors"] if c["domain"] != "You"
+    }
+    recommendations: list[dict] = []
+    for unit in unit_list:
+        # Threat = any competitor whose outranking_share against us is >= 50%
+        threats = [
+            c
+            for c in unit["competitors"]
+            if c["domain"] != "You" and (c["metrics"].get("outranking_share") or 0) >= 0.5
+        ]
+        if threats:
+            names = ", ".join(t["domain"] for t in threats[:3])
+            unit_label = unit["campaign"].get("name")
+            if unit.get("ad_group"):
+                unit_label += f" > {unit['ad_group'].get('name')}"
+            recommendations.append(
+                {
+                    "severity": "high",
+                    "code": "OUTRANKED_BY_COMPETITOR",
+                    "unit": unit_label,
+                    "message": (
+                        f"{len(threats)} competitor(s) outrank us in {unit_label}: {names}."
+                    ),
+                }
+            )
+
+    return {
+        "period_days": days,
+        "level": level,
+        "filter": {"campaign_id": campaign_id},
+        "summary": {
+            "units": len(unit_list),
+            "unique_competitors": len(unique_domains),
+        },
+        "units": unit_list,
+        "recommendations": recommendations,
+    }
+
+
+def _auction_head_to_head(competitors: list[dict]) -> dict:
+    """Extract the row for 'You' (self) so callers can compare quickly."""
+    self_row = next((c for c in competitors if c["domain"] == "You"), None)
+    if not self_row:
+        return {"you": None, "top_competitor": None}
+    top_competitor = next(
+        (c for c in competitors if c["domain"] != "You"),
+        None,
+    )
+    return {
+        "you": self_row["metrics"],
+        "top_competitor": (
+            {
+                "domain": top_competitor["domain"],
+                "metrics": top_competitor["metrics"],
+            }
+            if top_competitor
+            else None
+        ),
+    }
+
+
 def _summarize_consent_coverage(
     *,
     customer_id: str,
@@ -1150,6 +1349,118 @@ def register_read_tools(mcp) -> None:
             ORDER BY conversion_action.name
         """
         return _run("get_conversion_actions", customer_id, query)
+
+    @mcp.tool(annotations=READ_ONLY)
+    @audited_tool
+    def get_auction_insights(
+        customer_id: str = Field(description="Google Ads customer ID"),
+        days: int = Field(default=30, description="Lookback window 1-365"),
+        level: str = Field(
+            default="campaign",
+            description="Aggregation level: 'campaign' (default) or 'ad_group'.",
+        ),
+        campaign_id: Optional[str] = Field(
+            default=None,
+            description="Optional campaign filter. Required if level='ad_group'.",
+        ),
+    ) -> str:
+        """Return Auction Insights per competitor domain, per campaign/ad_group, with head-to-head context.
+
+        NOTE: The Google Ads API restricts the `auction_insight_*` metric family
+        to developer tokens with the appropriate access level. If the token
+        lacks access, this tool returns a structured error with next steps
+        instead of raising.
+        """
+        ensure_tool_allowed("get_auction_insights")
+        cid = ensure_customer_allowed(customer_id)
+        lvl = (level or "").strip().lower()
+        if lvl not in {"campaign", "ad_group"}:
+            raise ValueError("level must be 'campaign' or 'ad_group'")
+        if lvl == "ad_group" and not campaign_id:
+            raise ValueError("campaign_id is required when level='ad_group'")
+
+        camp_filter = ""
+        if campaign_id:
+            camp_filter = f" AND campaign.id = {_id(campaign_id, 'campaign_id')}"
+
+        metric_fields = (
+            "metrics.auction_insight_search_impression_share, "
+            "metrics.auction_insight_search_absolute_top_impression_percentage, "
+            "metrics.auction_insight_search_top_impression_percentage, "
+            "metrics.auction_insight_search_outranking_share, "
+            "metrics.auction_insight_search_overlap_rate, "
+            "metrics.auction_insight_search_position_above_rate"
+        )
+        if lvl == "campaign":
+            query = f"""
+                SELECT
+                  campaign.id, campaign.name, campaign.status,
+                  segments.auction_insight_domain,
+                  {metric_fields}
+                FROM campaign
+                WHERE {_date_clause(days)}
+                  AND campaign.status != 'REMOVED'
+                  {camp_filter}
+                ORDER BY campaign.name,
+                         metrics.auction_insight_search_impression_share DESC
+            """
+        else:
+            query = f"""
+                SELECT
+                  campaign.id, campaign.name,
+                  ad_group.id, ad_group.name, ad_group.status,
+                  segments.auction_insight_domain,
+                  {metric_fields}
+                FROM ad_group
+                WHERE {_date_clause(days)}
+                  AND ad_group.status != 'REMOVED'
+                  {camp_filter}
+                ORDER BY ad_group.name,
+                         metrics.auction_insight_search_impression_share DESC
+            """
+
+        try:
+            rows = search(cid, query)
+        except RuntimeError as exc:
+            message = str(exc)
+            if "METRIC_ACCESS_DENIED" in message or "authorizationError" in message:
+                return format_json({
+                    "customer_id": cid,
+                    "tool": "get_auction_insights",
+                    "fresh": True,
+                    "level": lvl,
+                    "error": {
+                        "code": "METRIC_ACCESS_DENIED",
+                        "message": (
+                            "The developer token does not have access to the "
+                            "auction_insight_* metric family. This is a per-token "
+                            "authorization set by Google, independent of the account."
+                        ),
+                        "how_to_fix": [
+                            "Verify your token is at Basic or higher in the API Center.",
+                            "Request Auction Insights access via the Google Ads API application form.",
+                            "For clients where you cannot get access, export from the Ads UI "
+                            "(Insights > Auction Insights) as a workaround.",
+                        ],
+                        "raw": message[:400],
+                    },
+                })
+            raise
+
+        report = _summarize_auction_insights(
+            rows=rows, level=lvl, days=days, campaign_id=campaign_id
+        )
+        return format_json({
+            "customer_id": cid,
+            "tool": "get_auction_insights",
+            "fresh": True,
+            "filter": {
+                "level": lvl,
+                "campaign_id": campaign_id,
+                "days": days,
+            },
+            **report,
+        })
 
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
