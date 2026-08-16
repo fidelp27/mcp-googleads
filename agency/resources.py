@@ -19,6 +19,7 @@ DOCS = {
     "conversions-recommendations": "conversions-recommendations.md",
     "reporting-mcc": "reporting-mcc.md",
     "experiments": "experiments.md",
+    "demand-gen": "demand-gen.md",
 }
 KNOWN_TOOLS = set(
     """
@@ -36,6 +37,8 @@ add_customer_match_members remove_customer_match_members
 get_customer_match_list_stats get_offline_user_data_job_status
 list_experiments get_experiment get_experiment_results
 create_experiment schedule_experiment end_experiment
+create_demand_gen_campaign create_demand_gen_ad_group
+get_demand_gen_performance
 create_campaign_budget update_campaign_budget create_search_campaign
 create_pmax_campaign create_display_campaign update_campaign pause_campaign
 enable_campaign remove_campaign copy_campaign update_campaign_geo_targets
@@ -92,6 +95,12 @@ def _tool_domain(tool_name: str) -> str:
         "end_experiment",
     }:
         return "experiments"
+    if tool_name in {
+        "create_demand_gen_campaign",
+        "create_demand_gen_ad_group",
+        "get_demand_gen_performance",
+    }:
+        return "demand-gen"
     if any(token in tool_name for token in ("campaign", "budget", "ad_group", "ad_")):
         return "campaigns"
     if any(token in tool_name for token in ("keyword", "search_term", "waste")):
