@@ -779,6 +779,215 @@ def _is_account_recommendations(counter: dict, total: int, level: str) -> list[d
     return out
 
 
+def _summarize_consent_coverage(
+    *,
+    customer_id: str,
+    current_rows: list[dict],
+    previous_rows: list[dict],
+    settings_rows: list[dict],
+    days: int,
+    current_period: tuple[str, str],
+    previous_period: tuple[str, str],
+) -> dict:
+    """Attribution-rate audit as a Consent Mode / EC health proxy.
+
+    Kept pure so the alert paths are exercised without hitting Google Ads.
+    Attribution rate = attributed conversions / total conversions per campaign.
+    A drop of >=20 percentage points versus the previous window, or a
+    campaign with all_conversions>0 and 0 attributed, strongly points at
+    tag / consent breakage.
+    """
+    def _bucket(rows: list[dict]) -> dict[str, dict]:
+        buckets: dict[str, dict] = {}
+        for row in rows:
+            campaign = row.get("campaign", {}) or {}
+            metrics = row.get("metrics", {}) or {}
+            cid_ = campaign.get("id")
+            if not cid_:
+                continue
+            attributed = float(metrics.get("conversions") or 0)
+            total = float(metrics.get("allConversions") or 0)
+            attributed_value = float(metrics.get("conversionsValue") or 0)
+            total_value = float(metrics.get("allConversionsValue") or 0)
+            buckets[cid_] = {
+                "name": campaign.get("name"),
+                "status": campaign.get("status"),
+                "attributed_conversions": attributed,
+                "total_conversions": total,
+                "attribution_rate": (
+                    round(attributed / total, 4) if total > 0 else None
+                ),
+                "attributed_value": attributed_value,
+                "total_value": total_value,
+            }
+        return buckets
+
+    current = _bucket(current_rows)
+    previous = _bucket(previous_rows)
+
+    # ----- customer tracking snapshot -----
+    tracking = {
+        "accepted_customer_data_terms": None,
+        "enhanced_conversions_for_leads_enabled": None,
+        "conversion_tracking_status": None,
+    }
+    customer_name = None
+    if settings_rows:
+        c = settings_rows[0].get("customer", {}) or {}
+        customer_name = c.get("descriptiveName")
+        setting = c.get("conversionTrackingSetting", {}) or {}
+        tracking["accepted_customer_data_terms"] = setting.get(
+            "acceptedCustomerDataTerms"
+        )
+        tracking["enhanced_conversions_for_leads_enabled"] = setting.get(
+            "enhancedConversionsForLeadsEnabled"
+        )
+        tracking["conversion_tracking_status"] = setting.get(
+            "conversionTrackingStatus"
+        )
+
+    # ----- per-campaign comparison + alerts -----
+    campaigns: list[dict] = []
+    alerts: list[dict] = []
+    for cid_, cur in current.items():
+        prev = previous.get(cid_)
+        prev_rate = prev["attribution_rate"] if prev else None
+        cur_rate = cur["attribution_rate"]
+        rate_delta_pp = None
+        if cur_rate is not None and prev_rate is not None:
+            rate_delta_pp = round((cur_rate - prev_rate) * 100, 2)
+
+        entry = {
+            "campaign_id": cid_,
+            "campaign_name": cur["name"],
+            "status": cur["status"],
+            "current": {
+                "attributed_conversions": cur["attributed_conversions"],
+                "total_conversions": cur["total_conversions"],
+                "attribution_rate": cur_rate,
+            },
+            "previous": (
+                {
+                    "attributed_conversions": prev["attributed_conversions"],
+                    "total_conversions": prev["total_conversions"],
+                    "attribution_rate": prev_rate,
+                }
+                if prev
+                else None
+            ),
+            "attribution_rate_delta_pp": rate_delta_pp,
+        }
+        campaigns.append(entry)
+
+        # Per-campaign alerts
+        if cur["total_conversions"] > 0 and cur["attributed_conversions"] == 0:
+            alerts.append(
+                {
+                    "severity": "critical",
+                    "code": "ZERO_ATTRIBUTED_WITH_TOTAL",
+                    "campaign_id": cid_,
+                    "message": (
+                        f"'{cur['name']}' recorded {int(cur['total_conversions'])} conversions "
+                        "but 0 attributed. Verify gclid capture, Consent Mode signals and tag firing."
+                    ),
+                }
+            )
+        elif cur_rate is not None and cur_rate < 0.3 and cur["total_conversions"] >= 5:
+            alerts.append(
+                {
+                    "severity": "high",
+                    "code": "LOW_ATTRIBUTION_RATE",
+                    "campaign_id": cid_,
+                    "message": (
+                        f"'{cur['name']}' attribution rate is {round(cur_rate * 100, 1)}% "
+                        "(<30%). Consent Mode or tag setup likely leaking signal."
+                    ),
+                }
+            )
+        if rate_delta_pp is not None and rate_delta_pp <= -20:
+            alerts.append(
+                {
+                    "severity": "high",
+                    "code": "ATTRIBUTION_DROP",
+                    "campaign_id": cid_,
+                    "message": (
+                        f"'{cur['name']}' attribution rate fell {abs(rate_delta_pp):.1f}pp "
+                        "vs the previous window. Investigate tag or consent changes shipped recently."
+                    ),
+                }
+            )
+
+    # Customer-level alerts
+    if tracking["accepted_customer_data_terms"] is not True:
+        alerts.append(
+            {
+                "severity": "warning",
+                "code": "CUSTOMER_DATA_TERMS_NOT_ACCEPTED",
+                "message": (
+                    "Customer Data Terms not accepted. Enhanced Conversions cannot ingest "
+                    "user data until accepted at Admin > Data manager."
+                ),
+            }
+        )
+    if tracking["conversion_tracking_status"] not in {
+        "CONVERSION_TRACKING_MANAGED_BY_SELF",
+        "CONVERSION_TRACKING_MANAGED_BY_GOOGLE_ANALYTICS_GA_4",
+        "CONVERSION_TRACKING_MANAGED_BY_GOOGLE_ANALYTICS_UA",
+        "CONVERSION_TRACKING_MANAGED_BY_THIRD_PARTY_APP",
+    } and tracking["conversion_tracking_status"] is not None:
+        alerts.append(
+            {
+                "severity": "info",
+                "code": "UNEXPECTED_TRACKING_STATUS",
+                "message": (
+                    f"conversion_tracking_status='{tracking['conversion_tracking_status']}' "
+                    "is unexpected. Verify tracking ownership."
+                ),
+            }
+        )
+
+    total_current = sum(c["current"]["total_conversions"] for c in campaigns)
+    total_previous = sum(
+        c["previous"]["total_conversions"] if c["previous"] else 0.0 for c in campaigns
+    )
+    total_attributed_cur = sum(
+        c["current"]["attributed_conversions"] for c in campaigns
+    )
+    account_rate = (
+        round(total_attributed_cur / total_current, 4) if total_current > 0 else None
+    )
+    if account_rate is None:
+        alerts.append(
+            {
+                "severity": "info",
+                "code": "NO_DATA_TO_ASSESS",
+                "message": (
+                    "No conversions recorded in either window; can't assess consent signal health yet."
+                ),
+            }
+        )
+
+    return {
+        "customer_name": customer_name,
+        "period_days": days,
+        "current_period": {"start": current_period[0], "end": current_period[1]},
+        "previous_period": {"start": previous_period[0], "end": previous_period[1]},
+        "tracking": tracking,
+        "campaigns": campaigns,
+        "alerts": alerts,
+        "summary": {
+            "campaigns_evaluated": len(campaigns),
+            "total_conversions_current": total_current,
+            "total_conversions_previous": total_previous,
+            "account_attribution_rate": account_rate,
+        },
+        "notes": [
+            "The API does not expose per-event ad_user_data / ad_personalization signals. "
+            "This tool infers consent health from attribution-rate movement, which is the strongest observable proxy.",
+        ],
+    }
+
+
 def register_read_tools(mcp) -> None:
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
@@ -941,6 +1150,72 @@ def register_read_tools(mcp) -> None:
             ORDER BY conversion_action.name
         """
         return _run("get_conversion_actions", customer_id, query)
+
+    @mcp.tool(annotations=READ_ONLY)
+    @audited_tool
+    def check_consent_signal_coverage(
+        customer_id: str = Field(description="Google Ads customer ID"),
+        days: int = Field(default=30, description="Lookback window 1-365"),
+    ) -> str:
+        """Proxy audit for Consent Mode / Enhanced Conversions health via attribution rate per campaign.
+
+        Consent signals (`ad_user_data`, `ad_personalization`) fire client-side in the tag; the
+        Google Ads API does NOT expose them per event. This tool measures the downstream signal
+        that IS observable: the ratio of attributed conversions to all conversions, comparing the
+        current window against the previous same-length window, plus the customer tracking setup.
+        A sharp attribution-rate drop usually points at tag or consent issues before Smart Bidding
+        degrades.
+        """
+        ensure_tool_allowed("check_consent_signal_coverage")
+        cid = ensure_customer_allowed(customer_id)
+        if not 1 <= days <= 365:
+            raise ValueError("days must be between 1 and 365")
+
+        end = date.today()
+        current_start = end - timedelta(days=days - 1)
+        prev_end = current_start - timedelta(days=1)
+        prev_start = prev_end - timedelta(days=days - 1)
+
+        def _range(start, end_):
+            return (
+                f"segments.date BETWEEN '{start.isoformat()}' AND '{end_.isoformat()}'"
+            )
+
+        base_query = """
+            SELECT campaign.id, campaign.name, campaign.status,
+                   metrics.conversions, metrics.all_conversions,
+                   metrics.conversions_value, metrics.all_conversions_value
+            FROM campaign
+            WHERE {clause} AND campaign.status != 'REMOVED'
+        """
+        current_rows = search(cid, base_query.format(clause=_range(current_start, end)))
+        previous_rows = search(cid, base_query.format(clause=_range(prev_start, prev_end)))
+
+        settings_rows = search(
+            cid,
+            """
+            SELECT customer.id, customer.descriptive_name,
+                   customer.conversion_tracking_setting.accepted_customer_data_terms,
+                   customer.conversion_tracking_setting.enhanced_conversions_for_leads_enabled,
+                   customer.conversion_tracking_setting.conversion_tracking_status
+            FROM customer
+            """,
+        )
+        report = _summarize_consent_coverage(
+            customer_id=cid,
+            current_rows=current_rows,
+            previous_rows=previous_rows,
+            settings_rows=settings_rows,
+            days=days,
+            current_period=(current_start.isoformat(), end.isoformat()),
+            previous_period=(prev_start.isoformat(), prev_end.isoformat()),
+        )
+        return format_json({
+            "customer_id": cid,
+            "tool": "check_consent_signal_coverage",
+            "fresh": True,
+            **report,
+        })
 
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
