@@ -16,6 +16,7 @@ from .governance import (
     update_approval,
     validate_approval,
 )
+from .locks import ResourceLockedError, resource_lock
 
 
 def stable_idempotency_key(tool_name: str, customer_id: str, payload: Any) -> str:
@@ -116,11 +117,37 @@ def execute_mutation(
             }
         )
     try:
-        response = (
-            batch_mutate(customer_id, operations, validate_only=False)
-            if batch
-            else mutate(customer_id, service, operations, validate_only=False)
-        )
+        lock_key = _lock_key_for(operations, approval.get("previous_state"))
+        if lock_key is None:
+            response = (
+                batch_mutate(customer_id, operations, validate_only=False)
+                if batch
+                else mutate(customer_id, service, operations, validate_only=False)
+            )
+            lock_info = None
+        else:
+            try:
+                with resource_lock(customer_id, lock_key) as info:
+                    lock_info = info
+                    response = (
+                        batch_mutate(customer_id, operations, validate_only=False)
+                        if batch
+                        else mutate(customer_id, service, operations, validate_only=False)
+                    )
+            except ResourceLockedError as lock_error:
+                record_audit(
+                    tool_name,
+                    customer_id,
+                    payload,
+                    "lock_conflict",
+                    {
+                        "resource_key": lock_error.resource_key,
+                        "timeout_seconds": lock_error.timeout_seconds,
+                    },
+                    dry_run=False,
+                    operation_id=approval_id,
+                )
+                raise
         mutation_id = response.get("requestId") or response.get("request-id")
         audit_id = record_audit(
             tool_name,
@@ -135,17 +162,18 @@ def execute_mutation(
             previous_state=approval.get("previous_state"),
         )
         update_approval(approval_id, status="executed", audit_id=audit_id)
-        return format_json(
-            {
-                "status": "executed",
-                "executed": True,
-                "approval_id": approval_id,
-                "audit_id": audit_id,
-                "customer_id": customer_id,
-                "client_name": client_display_name(customer_id),
-                "result": response,
-            }
-        )
+        result_payload = {
+            "status": "executed",
+            "executed": True,
+            "approval_id": approval_id,
+            "audit_id": audit_id,
+            "customer_id": customer_id,
+            "client_name": client_display_name(customer_id),
+            "result": response,
+        }
+        if lock_info is not None:
+            result_payload["lock_wait_ms"] = lock_info["lock_wait_ms"]
+        return format_json(result_payload)
     except Exception as error:
         record_audit(
             tool_name,
@@ -157,3 +185,25 @@ def execute_mutation(
             operation_id=approval_id,
         )
         raise
+
+
+def _lock_key_for(
+    operations: list[dict[str, Any]] | None,
+    previous_state: Any,
+) -> str | None:
+    """Pick a resource key to lock: prefer the update's resourceName."""
+    if not operations:
+        return None
+    for op in operations:
+        if not isinstance(op, dict):
+            continue
+        update_body = op.get("update")
+        if isinstance(update_body, dict):
+            resource = update_body.get("resourceName")
+            if resource:
+                return str(resource)
+    if isinstance(previous_state, dict):
+        candidate = previous_state.get("resourceName")
+        if candidate:
+            return str(candidate)
+    return None

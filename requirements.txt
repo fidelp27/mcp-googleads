@@ -9,3 +9,6 @@ requests>=2.31.0
 
 # Environment configuration
 python-dotenv>=1.0.0
+
+# Multi-operator resource locking (agency/locks.py)
+filelock>=3.12
