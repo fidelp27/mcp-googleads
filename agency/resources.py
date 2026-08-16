@@ -20,6 +20,7 @@ DOCS = {
     "reporting-mcc": "reporting-mcc.md",
     "experiments": "experiments.md",
     "demand-gen": "demand-gen.md",
+    "offline-conversions": "offline-conversions.md",
 }
 KNOWN_TOOLS = set(
     """
@@ -39,6 +40,8 @@ list_experiments get_experiment get_experiment_results
 create_experiment schedule_experiment end_experiment
 create_demand_gen_campaign create_demand_gen_ad_group
 get_demand_gen_performance
+upload_click_conversions upload_call_conversions
+upload_conversion_adjustments
 create_campaign_budget update_campaign_budget create_search_campaign
 create_pmax_campaign create_display_campaign update_campaign pause_campaign
 enable_campaign remove_campaign copy_campaign update_campaign_geo_targets
@@ -101,6 +104,12 @@ def _tool_domain(tool_name: str) -> str:
         "get_demand_gen_performance",
     }:
         return "demand-gen"
+    if tool_name in {
+        "upload_click_conversions",
+        "upload_call_conversions",
+        "upload_conversion_adjustments",
+    }:
+        return "offline-conversions"
     if any(token in tool_name for token in ("campaign", "budget", "ad_group", "ad_")):
         return "campaigns"
     if any(token in tool_name for token in ("keyword", "search_term", "waste")):

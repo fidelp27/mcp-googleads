@@ -29,6 +29,11 @@ SENSITIVE_KEYS = {
     "image_base64",
     "members",
     "user_identifiers",
+    "conversions",
+    "adjustments",
+    "call_conversions",
+    "conversion_adjustments",
+    "caller_id",
 }
 
 
