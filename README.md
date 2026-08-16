@@ -230,6 +230,7 @@ Los runbooks completos están en:
 - `docs/guardrails.md`
 - `docs/agency-playbook.md`
 - `docs/client-facing.md`
+- `docs/reporting.md`
 
 También están disponibles como recursos MCP bajo `agency://docs/{domain}`.
 
