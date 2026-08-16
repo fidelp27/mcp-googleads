@@ -2,7 +2,7 @@
 
 Servidor MCP de operación para agencias: consulta, audita, crea y administra cuentas de Google Ads desde Claude, ChatGPT, Codex y cualquier cliente compatible con Model Context Protocol.
 
-Incluye 107 herramientas MCP, guardarraíles obligatorios, reporting white-label y soporte MCC. Puede ejecutarse localmente por `stdio` o publicarse mediante Streamable HTTP.
+Incluye 113 herramientas MCP, guardarraíles obligatorios, reporting white-label y soporte MCC. Puede ejecutarse localmente por `stdio` o publicarse mediante Streamable HTTP.
 
 ## Funcionalidades
 
@@ -229,6 +229,7 @@ Los runbooks completos están en:
 - `docs/campaigns.md`
 - `docs/keywords.md`
 - `docs/keyword-planner.md`
+- `docs/experiments.md`
 - `docs/guardrails.md`
 - `docs/agency-playbook.md`
 - `docs/client-facing.md`

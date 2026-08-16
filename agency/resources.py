@@ -18,6 +18,7 @@ DOCS = {
     "audiences-assets": "audiences-assets.md",
     "conversions-recommendations": "conversions-recommendations.md",
     "reporting-mcc": "reporting-mcc.md",
+    "experiments": "experiments.md",
 }
 KNOWN_TOOLS = set(
     """
@@ -33,6 +34,8 @@ get_impression_share_losses check_consent_signal_coverage
 get_auction_insights mcc_bulk_apply
 add_customer_match_members remove_customer_match_members
 get_customer_match_list_stats get_offline_user_data_job_status
+list_experiments get_experiment get_experiment_results
+create_experiment schedule_experiment end_experiment
 create_campaign_budget update_campaign_budget create_search_campaign
 create_pmax_campaign create_display_campaign update_campaign pause_campaign
 enable_campaign remove_campaign copy_campaign update_campaign_geo_targets
@@ -80,6 +83,15 @@ def _tool_domain(tool_name: str) -> str:
         "get_offline_user_data_job_status",
     }:
         return "audiences-assets"
+    if tool_name in {
+        "list_experiments",
+        "get_experiment",
+        "get_experiment_results",
+        "create_experiment",
+        "schedule_experiment",
+        "end_experiment",
+    }:
+        return "experiments"
     if any(token in tool_name for token in ("campaign", "budget", "ad_group", "ad_")):
         return "campaigns"
     if any(token in tool_name for token in ("keyword", "search_term", "waste")):
