@@ -10,6 +10,7 @@ from .offline_conversions_tools import register_offline_conversions_tools
 from .read_tools import register_read_tools
 from .reports import register_report_tools
 from .resources import register_resources
+from .waste_intelligence import register_waste_intelligence_tools
 from .write_tools import register_write_tools
 
 
@@ -23,5 +24,6 @@ def register_agency_tools(mcp) -> None:
     register_experiment_tools(mcp)
     register_demand_gen_tools(mcp)
     register_offline_conversions_tools(mcp)
+    register_waste_intelligence_tools(mcp)
     register_governance_tools(mcp)
     register_resources(mcp)
