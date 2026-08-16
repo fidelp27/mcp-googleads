@@ -9,6 +9,7 @@ from typing import Any
 from .api import batch_mutate, format_json, mutate
 from .config import client_display_name, ensure_customer_allowed, ensure_tool_allowed
 from .governance import (
+    build_diff_from_operations,
     create_approval,
     find_idempotent_result,
     record_audit,
@@ -59,12 +60,13 @@ def execute_mutation(
             previous_state=previous_state,
             idempotency_key=key,
         )
+        diff = build_diff_from_operations(previous_state, operations)
         record_audit(
             tool_name,
             customer_id,
             payload,
             "validated",
-            response,
+            {"response": response, "diff": diff},
             dry_run=True,
             operation_id=approval["approval_id"],
             idempotency_key=key,
@@ -83,6 +85,7 @@ def execute_mutation(
                 "expected_confirmation": expected_confirmation,
                 "client_approval_required": approval["client_approval_required"],
                 "preview": payload,
+                "diff": diff,
                 "google_validation": response,
                 "next_step": (
                     f"Call {tool_name} again with the same arguments, dry_run=false, "

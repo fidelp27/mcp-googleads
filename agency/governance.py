@@ -148,6 +148,116 @@ def audited_tool(function: Callable[..., Any]) -> Callable[..., Any]:
     return sync_wrapper
 
 
+def _snake_to_camel(value: str) -> str:
+    parts = value.split(".")
+    def _camel(token: str) -> str:
+        chunks = token.split("_")
+        return chunks[0] + "".join(c.capitalize() for c in chunks[1:])
+    return ".".join(_camel(p) for p in parts)
+
+
+def _get_nested(obj: Any, path: str) -> Any:
+    """Walk a dotted path on nested dicts (safe for missing keys)."""
+    if obj is None:
+        return None
+    current: Any = obj
+    for key in path.split("."):
+        if isinstance(current, dict):
+            current = current.get(key)
+        else:
+            return None
+    return current
+
+
+def build_diff(
+    before: Any,
+    after: Any,
+    *,
+    mask_fields: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return {field, old, new} entries for every changed field.
+
+    When `mask_fields` is provided (snake_case field paths from
+    Google Ads `updateMask`), only those fields are compared and the
+    output is stable (one entry per mask field, even if unchanged).
+    Otherwise the top-level keys of both dicts are compared and only
+    the changed ones are emitted. Values are compared by equality
+    after JSON-normalizing so tuples vs lists don't false-positive.
+    """
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return []
+    entries: list[dict[str, Any]] = []
+    if mask_fields:
+        for snake_path in mask_fields:
+            clean = snake_path.strip()
+            if not clean:
+                continue
+            camel_path = _snake_to_camel(clean)
+            old_val = _get_nested(before, camel_path)
+            new_val = _get_nested(after, camel_path)
+            if _normalize(old_val) == _normalize(new_val):
+                entries.append({"field": clean, "old": old_val, "new": new_val, "changed": False})
+            else:
+                entries.append({"field": clean, "old": old_val, "new": new_val, "changed": True})
+        return entries
+    keys = set(before.keys()) | set(after.keys())
+    for key in sorted(keys):
+        old_val = before.get(key)
+        new_val = after.get(key)
+        if _normalize(old_val) != _normalize(new_val):
+            entries.append({"field": key, "old": old_val, "new": new_val, "changed": True})
+    return entries
+
+
+def _normalize(value: Any) -> Any:
+    """Normalize a value for equality comparison.
+
+    Google returns numeric fields as strings ('amountMicros': '5000000') but
+    payloads may use ints. Normalize obvious cases so we don't flag no-ops.
+    """
+    if isinstance(value, str) and value.lstrip("-").isdigit():
+        try:
+            return int(value)
+        except ValueError:
+            return value
+    return value
+
+
+def build_diff_from_operations(
+    previous_state: Any,
+    operations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """For every update operation, produce a diff against previous_state.
+
+    Handles the common single-resource case (previous_state is a dict for
+    one campaign/budget/etc). For multi-resource updates callers should
+    pass structured previous_state and expect a per-operation entry back.
+    """
+    if not operations:
+        return []
+    if not isinstance(previous_state, (dict, list)):
+        return []
+    result: list[dict[str, Any]] = []
+    for i, op in enumerate(operations):
+        update_body = op.get("update") if isinstance(op, dict) else None
+        if not isinstance(update_body, dict):
+            continue
+        mask = (op.get("updateMask") or "").split(",") if isinstance(op, dict) else []
+        if isinstance(previous_state, list):
+            before = previous_state[i] if i < len(previous_state) else {}
+        else:
+            before = previous_state
+        diff = build_diff(before if isinstance(before, dict) else {}, update_body, mask_fields=[f.strip() for f in mask if f.strip()])
+        result.append(
+            {
+                "resource": update_body.get("resourceName"),
+                "update_mask": mask,
+                "changes": diff,
+            }
+        )
+    return result
+
+
 def payload_hash(tool_name: str, customer_id: str, payload: Any) -> str:
     raw = json.dumps(
         {"tool": tool_name, "customer_id": customer_id, "payload": payload},
