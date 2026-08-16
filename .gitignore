@@ -58,3 +58,4 @@ generated/
 
 # Agency runtime state
 data/
+output/
