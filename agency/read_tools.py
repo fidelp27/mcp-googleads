@@ -258,6 +258,300 @@ def _to_int(value: str | int | None) -> int | None:
         return None
 
 
+_AD_STRENGTH_LABELS = ("PENDING", "LEARNING", "LOW", "GOOD", "BEST", "UNKNOWN")
+_AD_STRENGTH_BUCKETS = ("POOR", "AVERAGE", "GOOD", "EXCELLENT", "UNKNOWN")
+
+
+def _summarize_ad_strength(*, rows: list[dict], days: int) -> dict:
+    """Turn ad_group_ad GAQL rows into an Ad Strength diagnostic report.
+
+    Kept pure so tests exercise every alert path without touching the API.
+    """
+    ads: list[dict] = []
+    strength_counter = {b: 0 for b in _AD_STRENGTH_BUCKETS}
+    label_counter = {l: 0 for l in _AD_STRENGTH_LABELS}
+    pinned_ads = 0
+
+    for row in rows:
+        ad_group_ad = row.get("adGroupAd", {}) or {}
+        ad = ad_group_ad.get("ad", {}) or {}
+        rsa = ad.get("responsiveSearchAd", {}) or {}
+        metrics = row.get("metrics", {}) or {}
+        campaign = row.get("campaign", {}) or {}
+        ad_group = row.get("adGroup", {}) or {}
+
+        strength = (ad_group_ad.get("adStrength") or "UNKNOWN").upper()
+        bucket = strength if strength in _AD_STRENGTH_BUCKETS else "UNKNOWN"
+        strength_counter[bucket] += 1
+
+        headlines_report = _asset_slot_report(rsa.get("headlines") or [], label_counter)
+        descriptions_report = _asset_slot_report(
+            rsa.get("descriptions") or [], label_counter
+        )
+        if headlines_report["pinned_count"] or descriptions_report["pinned_count"]:
+            pinned_ads += 1
+
+        impressions = int(metrics.get("impressions") or 0)
+        clicks = int(metrics.get("clicks") or 0)
+        ctr = (clicks / impressions) if impressions else 0.0
+
+        path1 = rsa.get("path1")
+        path2 = rsa.get("path2")
+        if path1 and path2:
+            path_display = f"{path1}/{path2}"
+        elif path1:
+            path_display = path1
+        elif path2:
+            path_display = f"/{path2}"
+        else:
+            path_display = None
+
+        ads.append(
+            {
+                "campaign": {"id": campaign.get("id"), "name": campaign.get("name")},
+                "ad_group": {"id": ad_group.get("id"), "name": ad_group.get("name")},
+                "ad_id": ad.get("id"),
+                "status": ad_group_ad.get("status"),
+                "type": ad.get("type"),
+                "ad_strength": bucket,
+                "path_display": path_display,
+                "metrics": {
+                    "window_days": days,
+                    "impressions": impressions,
+                    "clicks": clicks,
+                    "conversions": float(metrics.get("conversions") or 0),
+                    "ctr": round(ctr, 4),
+                },
+                "headlines": headlines_report,
+                "descriptions": descriptions_report,
+                "suggestions": _ad_suggestions(
+                    bucket, headlines_report, descriptions_report, impressions
+                ),
+            }
+        )
+
+    recommendations = _account_ad_recommendations(
+        ads, strength_counter, label_counter
+    )
+    return {
+        "period_days": days,
+        "summary": {
+            "total_ads": len(ads),
+            "by_strength": strength_counter,
+            "assets_by_label": label_counter,
+            "ads_with_pinned_assets": pinned_ads,
+        },
+        "ads": ads,
+        "recommendations": recommendations,
+    }
+
+
+def _asset_slot_report(items: list[dict], label_counter: dict) -> dict:
+    counts_by_label = {l: 0 for l in _AD_STRENGTH_LABELS}
+    normalized_items: list[dict] = []
+    pinned = 0
+    approved = 0
+    for item in items:
+        text = item.get("text") or ""
+        label = (item.get("assetPerformanceLabel") or "UNKNOWN").upper()
+        if label not in counts_by_label:
+            label = "UNKNOWN"
+        counts_by_label[label] += 1
+        label_counter[label] += 1
+
+        pinned_field = item.get("pinnedField")
+        if pinned_field:
+            pinned += 1
+
+        policy = item.get("policySummaryInfo") or {}
+        is_approved = policy.get("approvalStatus") == "APPROVED"
+        if is_approved:
+            approved += 1
+
+        normalized_items.append(
+            {
+                "text": text,
+                "label": label,
+                "pinned_to": pinned_field,
+                "approved": is_approved,
+                "approval_status": policy.get("approvalStatus"),
+            }
+        )
+    return {
+        "count": len(items),
+        "pinned_count": pinned,
+        "approved_count": approved,
+        "counts_by_label": counts_by_label,
+        "items": normalized_items,
+    }
+
+
+def _ad_suggestions(
+    strength: str,
+    headlines: dict,
+    descriptions: dict,
+    impressions: int,
+) -> list[dict]:
+    out: list[dict] = []
+    hl_count = headlines["count"]
+    desc_count = descriptions["count"]
+    hl_low = headlines["counts_by_label"].get("LOW", 0)
+    desc_low = descriptions["counts_by_label"].get("LOW", 0)
+    hl_pending = headlines["counts_by_label"].get("PENDING", 0)
+    desc_pending = descriptions["counts_by_label"].get("PENDING", 0)
+    hl_best = headlines["counts_by_label"].get("BEST", 0)
+
+    if hl_count < 8:
+        out.append(
+            {
+                "severity": "high" if hl_count < 5 else "warning",
+                "code": "FEW_HEADLINES",
+                "message": (
+                    f"Only {hl_count} headlines. Google recommends 8-15 for RSAs; more variety improves Ad Strength."
+                ),
+            }
+        )
+    if desc_count < 3:
+        out.append(
+            {
+                "severity": "high" if desc_count < 2 else "warning",
+                "code": "FEW_DESCRIPTIONS",
+                "message": (
+                    f"Only {desc_count} descriptions. Add at least 3-4 for stronger creative testing."
+                ),
+            }
+        )
+    if strength == "POOR":
+        out.append(
+            {
+                "severity": "high",
+                "code": "AD_STRENGTH_POOR",
+                "message": (
+                    "Ad Strength POOR reduces auction eligibility. Replace weakest assets and add more distinct headlines."
+                ),
+            }
+        )
+    elif strength == "AVERAGE":
+        out.append(
+            {
+                "severity": "warning",
+                "code": "AD_STRENGTH_AVERAGE",
+                "message": (
+                    "Ad Strength AVERAGE leaves impressions on the table. Aim for GOOD/EXCELLENT."
+                ),
+            }
+        )
+    if hl_low or desc_low:
+        out.append(
+            {
+                "severity": "warning",
+                "code": "LOW_PERFORMING_ASSETS",
+                "message": (
+                    f"{hl_low} headline(s) and {desc_low} description(s) labeled LOW; replace them to lift Ad Strength."
+                ),
+            }
+        )
+    if impressions == 0:
+        out.append(
+            {
+                "severity": "info",
+                "code": "NO_IMPRESSIONS_IN_WINDOW",
+                "message": (
+                    "Ad has no impressions in the window; asset labels stay PENDING until enough serving history accumulates."
+                ),
+            }
+        )
+    elif impressions < 200 and (hl_pending or desc_pending):
+        out.append(
+            {
+                "severity": "info",
+                "code": "INSUFFICIENT_SERVING_HISTORY",
+                "message": (
+                    f"Only {impressions} impressions — several assets still PENDING. Give it 1-2 weeks of serving before rotating creative."
+                ),
+            }
+        )
+    if headlines["pinned_count"] >= hl_count and hl_count > 0:
+        out.append(
+            {
+                "severity": "warning",
+                "code": "OVER_PINNED_HEADLINES",
+                "message": (
+                    "Every headline is pinned; Google cannot experiment with combinations and Ad Strength will stay low."
+                ),
+            }
+        )
+    if hl_best and headlines["pinned_count"] == 0:
+        # positive nudge, not a warning
+        out.append(
+            {
+                "severity": "info",
+                "code": "BEST_HEADLINES_WITHOUT_PINS",
+                "message": (
+                    f"{hl_best} headline(s) labeled BEST but none pinned. Consider pinning at least one BEST asset to position 1 to lock in brand voice."
+                ),
+            }
+        )
+    return out
+
+
+def _account_ad_recommendations(
+    ads: list[dict], strength_counter: dict, label_counter: dict
+) -> list[dict]:
+    total = len(ads)
+    if total == 0:
+        return [
+            {
+                "severity": "info",
+                "code": "NO_ADS_MATCHED_FILTER",
+                "message": "No RSAs matched the filter. Widen the window or drop min_impressions.",
+            }
+        ]
+    out: list[dict] = []
+    poor = strength_counter.get("POOR", 0)
+    average = strength_counter.get("AVERAGE", 0)
+    if poor:
+        out.append(
+            {
+                "severity": "high",
+                "code": "POOR_STRENGTH_SHARE",
+                "message": f"{poor}/{total} RSAs are POOR. Prioritize rewriting those first.",
+            }
+        )
+    if average >= total / 2 and average > 0:
+        out.append(
+            {
+                "severity": "warning",
+                "code": "MAJORITY_AVERAGE",
+                "message": f"{average}/{total} RSAs sit at AVERAGE strength — creative-lift sprint has high ROI here.",
+            }
+        )
+    low_assets = label_counter.get("LOW", 0)
+    if low_assets:
+        out.append(
+            {
+                "severity": "warning",
+                "code": "LOW_ASSETS_ACROSS_ACCOUNT",
+                "message": (
+                    f"{low_assets} LOW-labeled assets across the account; consolidate a replacement batch."
+                ),
+            }
+        )
+    pending = label_counter.get("PENDING", 0)
+    scored = sum(label_counter.get(l, 0) for l in ("LOW", "GOOD", "BEST"))
+    if pending and scored == 0:
+        out.append(
+            {
+                "severity": "info",
+                "code": "ALL_PENDING",
+                "message": (
+                    f"All {pending} assets are still PENDING; the account has no serving history to grade against."
+                ),
+            }
+        )
+    return out
+
+
 def register_read_tools(mcp) -> None:
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
@@ -420,6 +714,60 @@ def register_read_tools(mcp) -> None:
             ORDER BY conversion_action.name
         """
         return _run("get_conversion_actions", customer_id, query)
+
+    @mcp.tool(annotations=READ_ONLY)
+    @audited_tool
+    def get_ad_strength_diagnostics(
+        customer_id: str = Field(description="Google Ads customer ID"),
+        campaign_id: Optional[str] = Field(
+            default=None, description="Optional campaign filter"
+        ),
+        days: int = Field(default=30, description="Lookback window 1-365"),
+        min_impressions: int = Field(
+            default=0,
+            description="Filter out ads with fewer than N impressions in the window",
+            ge=0,
+        ),
+    ) -> str:
+        """Return Ad Strength per RSA plus per-asset performance labels and actionable suggestions."""
+        ensure_tool_allowed("get_ad_strength_diagnostics")
+        cid = ensure_customer_allowed(customer_id)
+        filters = [
+            _date_clause(days),
+            "ad_group_ad.status != 'REMOVED'",
+            "ad_group_ad.ad.type = RESPONSIVE_SEARCH_AD",
+            f"metrics.impressions >= {int(min_impressions)}",
+        ]
+        if campaign_id:
+            filters.append(f"campaign.id = {_id(campaign_id, 'campaign_id')}")
+        query = f"""
+            SELECT
+              campaign.id, campaign.name,
+              ad_group.id, ad_group.name,
+              ad_group_ad.ad.id, ad_group_ad.ad.type,
+              ad_group_ad.status, ad_group_ad.ad_strength,
+              ad_group_ad.ad.responsive_search_ad.headlines,
+              ad_group_ad.ad.responsive_search_ad.descriptions,
+              ad_group_ad.ad.responsive_search_ad.path1,
+              ad_group_ad.ad.responsive_search_ad.path2,
+              metrics.impressions, metrics.clicks, metrics.conversions
+            FROM ad_group_ad
+            WHERE {' AND '.join(filters)}
+            ORDER BY metrics.impressions DESC
+        """
+        rows = search(cid, query)
+        report = _summarize_ad_strength(rows=rows, days=days)
+        return format_json({
+            "customer_id": cid,
+            "tool": "get_ad_strength_diagnostics",
+            "fresh": True,
+            "filter": {
+                "campaign_id": campaign_id,
+                "min_impressions": int(min_impressions),
+                "days": days,
+            },
+            **report,
+        })
 
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool

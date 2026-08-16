@@ -4,6 +4,50 @@
 
 Ejecuta `get_client_context`, `get_account_currency`, `get_campaign_performance`, `get_budget_utilization` y, si existe un incidente, `get_change_history`.
 
+## Diagnóstico creativo — Ad Strength
+
+`get_ad_strength_diagnostics(customer_id, campaign_id?, days=30, min_impressions=0)` audita cada RSA y su calidad de assets.
+
+Ejecutar antes de tocar creatividades, antes de escalar presupuesto y como paso 1 de cualquier review trimestral.
+
+### Qué devuelve
+
+- **summary:** `total_ads`, `by_strength` (POOR/AVERAGE/GOOD/EXCELLENT/UNKNOWN), `assets_by_label` (PENDING/LEARNING/LOW/GOOD/BEST), `ads_with_pinned_assets`.
+- **ads:** por RSA — campaign, ad_group, ad_id, status, `ad_strength`, `path_display`, métricas del período (impressions/clicks/conversions/CTR), detalle de headlines y descriptions con contador por label + items individuales (text, label, pinned_to, approved), y `suggestions` accionables.
+- **recommendations:** conclusiones a nivel cuenta.
+
+### Códigos de sugerencia (por ad)
+
+| Código | Cuándo se dispara |
+|---|---|
+| `FEW_HEADLINES` | Menos de 8 headlines (high si <5). |
+| `FEW_DESCRIPTIONS` | Menos de 3 descriptions (high si <2). |
+| `AD_STRENGTH_POOR` | Strength POOR reduce elegibilidad en subasta. |
+| `AD_STRENGTH_AVERAGE` | Strength AVERAGE, dejar impresiones sobre la mesa. |
+| `LOW_PERFORMING_ASSETS` | Uno o más headlines/descriptions LOW. |
+| `NO_IMPRESSIONS_IN_WINDOW` | Sin serving; labels quedan PENDING. |
+| `INSUFFICIENT_SERVING_HISTORY` | <200 impressions con assets PENDING. |
+| `OVER_PINNED_HEADLINES` | Todos los headlines pinneados; Google no puede rotar. |
+| `BEST_HEADLINES_WITHOUT_PINS` | Hay BEST sin pinnear (candidato a posición 1). |
+
+### Códigos a nivel cuenta
+
+| Código | Cuándo |
+|---|---|
+| `POOR_STRENGTH_SHARE` | Al menos 1 RSA en POOR. |
+| `MAJORITY_AVERAGE` | ≥50% en AVERAGE. |
+| `LOW_ASSETS_ACROSS_ACCOUNT` | Assets LOW acumulados en múltiples ads. |
+| `ALL_PENDING` | Toda la cuenta sin serving history todavía. |
+| `NO_ADS_MATCHED_FILTER` | El filtro no devolvió RSAs. |
+
+### Ejemplo (Clariola)
+
+```text
+get_ad_strength_diagnostics(customer_id="5461642152", days=30)
+```
+
+Devuelve 7 RSAs (1 AVERAGE, 6 sin scorear), 92 assets PENDING, recomendación `ALL_PENDING`.
+
 ## Crear estructura
 
 1. `create_campaign_budget` con `dry_run=true`.
