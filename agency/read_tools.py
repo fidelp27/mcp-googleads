@@ -10,6 +10,7 @@ from pydantic import Field
 
 from .api import format_json, search
 from .config import ensure_customer_allowed, ensure_tool_allowed
+from .errors import GoogleAdsError
 from .governance import audited_tool
 
 
@@ -1421,9 +1422,8 @@ def register_read_tools(mcp) -> None:
 
         try:
             rows = search(cid, query)
-        except RuntimeError as exc:
-            message = str(exc)
-            if "METRIC_ACCESS_DENIED" in message or "authorizationError" in message:
+        except GoogleAdsError as exc:
+            if exc.has_code("authorizationError", "METRIC_ACCESS_DENIED"):
                 return format_json({
                     "customer_id": cid,
                     "tool": "get_auction_insights",
@@ -1442,7 +1442,7 @@ def register_read_tools(mcp) -> None:
                             "For clients where you cannot get access, export from the Ads UI "
                             "(Insights > Auction Insights) as a workaround.",
                         ],
-                        "raw": message[:400],
+                        "details": exc.to_dict(),
                     },
                 })
             raise

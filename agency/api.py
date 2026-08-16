@@ -12,6 +12,7 @@ from typing import Any
 import requests
 
 from .config import ensure_customer_allowed, get_settings
+from .errors import GoogleAdsError
 
 
 _rate_lock = RLock()
@@ -78,17 +79,19 @@ def request(
                 time.sleep(max(retry_after, (2**attempt) + random.random()))
                 continue
             if not response.ok:
-                request_id = response.headers.get("request-id")
-                detail = response.text[:4000]
-                raise RuntimeError(
-                    f"Google Ads API {response.status_code}; request_id={request_id}; response={detail}"
+                raise GoogleAdsError.from_response(
+                    http_status=response.status_code,
+                    api_version=server.API_VERSION,
+                    body=response.text[:6000],
                 )
             if not response.content:
                 return {}
             return response.json()
         except (requests.RequestException, json.JSONDecodeError, RuntimeError) as error:
             last_error = error
-            if attempt >= retries - 1 or isinstance(error, RuntimeError):
+            if attempt >= retries - 1 or isinstance(error, GoogleAdsError):
+                raise
+            if isinstance(error, RuntimeError):
                 raise
             time.sleep((2**attempt) + random.random())
     raise RuntimeError(f"Google Ads request failed: {last_error}")
