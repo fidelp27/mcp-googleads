@@ -8,6 +8,8 @@ from typing import Any, Optional
 from mcp.types import ToolAnnotations
 
 from .api import format_json
+from .audit_retention import export_audit_log as _export_audit_log
+from .audit_retention import rotate_audit_log as _rotate_audit_log
 from .config import ensure_customer_allowed
 from .governance import (
     APPROVAL_PATH,
@@ -54,6 +56,56 @@ def register_governance_tools(mcp) -> None:
         return format_json(
             query_audit_log(normalized, operator, days, tool_name)
         )
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    @audited_tool
+    def export_audit_log(
+        destination: str,
+        format: str = "jsonl",
+        days: Optional[int] = None,
+        operator: Optional[str] = None,
+        customer_id: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        status: Optional[str] = None,
+        since: Optional[str] = None,
+        until: Optional[str] = None,
+    ) -> str:
+        """Write filtered audit entries to a local file.
+
+        Formats: `jsonl` (default, preserves nesting), `csv` (flat cols with
+        nested fields as JSON strings), `markdown_report` (grouped by day).
+        Filter by `days`, `operator`, `customer_id`, `tool_name`, `status`,
+        or ISO `since`/`until` timestamps. Writes with mode 0600 (best effort).
+        """
+        normalized_customer = (
+            ensure_customer_allowed(customer_id) if customer_id else None
+        )
+        return format_json(
+            _export_audit_log(
+                destination=destination,
+                fmt=format,
+                days=days,
+                operator=operator,
+                customer_id=normalized_customer,
+                tool_name=tool_name,
+                status=status,
+                since=since,
+                until=until,
+            )
+        )
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    @audited_tool
+    def rotate_audit_log(
+        retention_days: Optional[int] = None,
+    ) -> str:
+        """Archive daily audit files older than retention_days into monthly zips.
+
+        Defaults to `AUDIT_RETENTION_DAYS` from settings. Only files matching
+        `audit-YYYY-MM-DD.jsonl` are archived; the main `audit.jsonl` and
+        anything else in the data dir is left alone.
+        """
+        return format_json(_rotate_audit_log(retention_days=retention_days))
 
     def pending(min_age_minutes: int, client_only: bool = False) -> list[dict[str, Any]]:
         threshold = datetime.now(timezone.utc) - timedelta(minutes=max(0, min_age_minutes))
