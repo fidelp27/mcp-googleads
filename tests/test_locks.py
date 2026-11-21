@@ -71,33 +71,14 @@ def test_two_threads_serialize_on_same_resource(isolated_lock_root):
 
 
 def test_second_call_times_out_when_first_holds(isolated_lock_root):
-    holder_done = threading.Event()
-
-    def hold_lock():
-        with locks.resource_lock(
-            "1234567890",
-            "customers/1/campaigns/1",
-            timeout_seconds=5,
-        ):
-            time.sleep(0.5)
-        holder_done.set()
-
-    holder = threading.Thread(target=hold_lock)
-    holder.start()
-    # Give the holder time to acquire the lock
-    time.sleep(0.05)
-
-    with pytest.raises(locks.ResourceLockedError) as exc_info:
-        with locks.resource_lock(
-            "1234567890",
-            "customers/1/campaigns/1",
-            timeout_seconds=0.1,
-        ):
-            pytest.fail("should never enter this block")
-    assert exc_info.value.resource_key == "customers/1/campaigns/1"
+    customer_id = "1234567890"
+    resource_key = "customers/1/campaigns/1"
+    with locks.resource_lock(customer_id, resource_key):
+        with pytest.raises(locks.ResourceLockedError) as exc_info:
+            with locks.resource_lock(customer_id, resource_key, timeout_seconds=0.1):
+                pytest.fail("should never enter this block")
+    assert exc_info.value.resource_key == resource_key
     assert exc_info.value.timeout_seconds == 0.1
-    holder.join()
-    assert holder_done.is_set()
 
 
 def test_different_customers_do_not_block_each_other(isolated_lock_root):
@@ -138,29 +119,16 @@ def test_negative_timeout_rejected(isolated_lock_root):
 
 
 def test_error_message_contains_key_fields(isolated_lock_root):
-    def hold_lock():
-        with locks.resource_lock(
-            "1234567890", "customers/1/campaigns/1", timeout_seconds=5
-        ):
-            time.sleep(0.3)
-
-    holder = threading.Thread(target=hold_lock)
-    holder.start()
-    time.sleep(0.05)
-    try:
+    customer_id = "1234567890"
+    resource_key = "customers/1/campaigns/1"
+    with locks.resource_lock(customer_id, resource_key):
         with pytest.raises(locks.ResourceLockedError) as exc_info:
-            with locks.resource_lock(
-                "1234567890",
-                "customers/1/campaigns/1",
-                timeout_seconds=0.05,
-            ):
+            with locks.resource_lock(customer_id, resource_key, timeout_seconds=0.05):
                 pass
-        message = str(exc_info.value)
-        assert "RESOURCE_LOCKED" in message
-        assert "1234567890" in message
-        assert "customers/1/campaigns/1" in message
-    finally:
-        holder.join()
+    message = str(exc_info.value)
+    assert "RESOURCE_LOCKED" in message
+    assert customer_id in message
+    assert resource_key in message
 
 
 # ---------- lock_paths_for ----------
