@@ -63,9 +63,8 @@ def test_wheel_packages_builtin_profiles_outside_repo_checkout(tmp_path):
         ],
         capture_output=True,
         text=True,
-        check=True,
     )
-    assert result.returncode == 0
+    assert result.returncode == 0, f"Wheel build failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
     wheels = list(wheel_dir.glob("google_ads_mcp_server-*.whl"))
     assert len(wheels) == 1, f"Expected 1 wheel, found {wheels}"
 
