@@ -13,12 +13,12 @@ from agency.read_tools import _summarize_enhanced_conversions, _to_int
 CUSTOMER_ROWS_BASIC = [
     {
         "customer": {
-            "id": "5461642152",
-            "descriptiveName": "Clariola",
+            "id": "1234567890",
+            "descriptiveName": "Demo Account",
             "conversionTrackingSetting": {
                 "conversionTrackingId": "18341119034",
                 "conversionTrackingStatus": "CONVERSION_TRACKING_MANAGED_BY_SELF",
-                "googleAdsConversionCustomer": "customers/5461642152",
+                "googleAdsConversionCustomer": "customers/1234567890",
             },
         }
     }
@@ -27,8 +27,8 @@ CUSTOMER_ROWS_BASIC = [
 ACTION_ROWS_PURCHASE_ONLY = [
     {
         "conversionAction": {
-            "resourceName": "customers/5461642152/conversionActions/7693341777",
-            "id": "7693341777",
+            "resourceName": "customers/1234567890/conversionActions/1000000001",
+            "id": "1000000001",
             "name": "Purchase",
             "status": "ENABLED",
             "type": "WEBPAGE",
@@ -47,8 +47,8 @@ ACTION_ROWS_PURCHASE_ONLY = [
     },
     {
         "conversionAction": {
-            "resourceName": "customers/5461642152/conversionActions/7697858539",
-            "id": "7697858539",
+            "resourceName": "customers/1234567890/conversionActions/1000000002",
+            "id": "1000000002",
             "name": "Purchase (1)",
             "status": "ENABLED",
             "type": "GOOGLE_ANALYTICS_4_CUSTOM",
@@ -73,7 +73,7 @@ _UNSET = object()
 
 def _call(customer_rows=_UNSET, action_rows=_UNSET, metric_rows=_UNSET, days=30):
     return _summarize_enhanced_conversions(
-        customer_id="5461642152",
+        customer_id="1234567890",
         customer_rows=CUSTOMER_ROWS_BASIC if customer_rows is _UNSET else customer_rows,
         action_rows=ACTION_ROWS_PURCHASE_ONLY if action_rows is _UNSET else action_rows,
         metric_rows=[] if metric_rows is _UNSET else metric_rows,
@@ -97,7 +97,7 @@ def test_report_has_expected_top_level_keys():
 
 def test_customer_name_comes_from_customer_row():
     report = _call()
-    assert report["customer_name"] == "Clariola"
+    assert report["customer_name"] == "Demo Account"
 
 
 def test_tracking_settings_are_copied():
@@ -106,7 +106,7 @@ def test_tracking_settings_are_copied():
     assert report["tracking"]["status"] == "CONVERSION_TRACKING_MANAGED_BY_SELF"
     assert (
         report["tracking"]["google_ads_conversion_customer"]
-        == "customers/5461642152"
+        == "customers/1234567890"
     )
     # Fields not present in the response stay None
     assert report["tracking"]["accepted_customer_data_terms"] is None
@@ -116,7 +116,7 @@ def test_tracking_settings_are_copied():
 def test_actions_flatten_attribution_and_lookback_fields():
     report = _call()
     action = report["conversion_actions"][0]
-    assert action["id"] == "7693341777"
+    assert action["id"] == "1000000001"
     assert action["attribution_model"] == "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN"
     assert action["data_driven_model_status"] == "AVAILABLE"
     assert action["click_through_lookback_days"] == 30
@@ -137,7 +137,7 @@ def test_volume_rolls_up_across_rows_by_resource_name():
     metrics_rows = [
         {
             "segments": {
-                "conversionAction": "customers/5461642152/conversionActions/7693341777",
+                "conversionAction": "customers/1234567890/conversionActions/1000000001",
                 "conversionActionName": "Purchase",
                 "conversionActionCategory": "PURCHASE",
             },
@@ -145,7 +145,7 @@ def test_volume_rolls_up_across_rows_by_resource_name():
         },
         {
             "segments": {
-                "conversionAction": "customers/5461642152/conversionActions/7693341777",
+                "conversionAction": "customers/1234567890/conversionActions/1000000001",
                 "conversionActionName": "Purchase",
                 "conversionActionCategory": "PURCHASE",
             },
@@ -153,7 +153,7 @@ def test_volume_rolls_up_across_rows_by_resource_name():
         },
     ]
     report = _call(metric_rows=metrics_rows)
-    action = next(a for a in report["conversion_actions"] if a["id"] == "7693341777")
+    action = next(a for a in report["conversion_actions"] if a["id"] == "1000000001")
     assert action["metrics"]["all_conversions"] == 4.0
     assert action["metrics"]["conversions"] == 3.0
     assert action["metrics"]["conversions_value"] == 80.0
@@ -164,13 +164,13 @@ def test_metric_rows_without_resource_are_ignored():
         {"segments": {}, "metrics": {"conversions": 5}},
         {
             "segments": {
-                "conversionAction": "customers/5461642152/conversionActions/7693341777"
+                "conversionAction": "customers/1234567890/conversionActions/1000000001"
             },
             "metrics": {"conversions": 1},
         },
     ]
     report = _call(metric_rows=metrics_rows)
-    action = next(a for a in report["conversion_actions"] if a["id"] == "7693341777")
+    action = next(a for a in report["conversion_actions"] if a["id"] == "1000000001")
     assert action["metrics"]["conversions"] == 1.0
 
 
@@ -189,7 +189,7 @@ def test_alerts_upgrade_customer_data_terms_to_critical_when_leads_exist():
     lead_actions = ACTION_ROWS_PURCHASE_ONLY + [
         {
             "conversionAction": {
-                "resourceName": "customers/5461642152/conversionActions/9999",
+                "resourceName": "customers/1234567890/conversionActions/9999",
                 "id": "9999",
                 "name": "Lead form",
                 "status": "ENABLED",
@@ -209,7 +209,7 @@ def test_alerts_flag_ec4l_off_when_lead_actions_present():
     lead_actions = ACTION_ROWS_PURCHASE_ONLY + [
         {
             "conversionAction": {
-                "resourceName": "customers/5461642152/conversionActions/9999",
+                "resourceName": "customers/1234567890/conversionActions/9999",
                 "id": "9999",
                 "name": "Lead form",
                 "status": "ENABLED",
@@ -251,7 +251,7 @@ def test_alerts_skip_no_conversions_when_data_flowing():
     metrics_rows = [
         {
             "segments": {
-                "conversionAction": "customers/5461642152/conversionActions/7693341777"
+                "conversionAction": "customers/1234567890/conversionActions/1000000001"
             },
             "metrics": {"conversions": 5},
         }

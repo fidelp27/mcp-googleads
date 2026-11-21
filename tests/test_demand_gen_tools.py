@@ -22,12 +22,12 @@ def test_positive_int_bad(bad):
 
 def test_campaign_and_budget_resources():
     assert (
-        dg._campaign_resource("5461642152", "24140931767")
-        == "customers/5461642152/campaigns/24140931767"
+        dg._campaign_resource("1234567890", "11111111111")
+        == "customers/1234567890/campaigns/11111111111"
     )
     assert (
-        dg._budget_resource("5461642152", "999")
-        == "customers/5461642152/campaignBudgets/999"
+        dg._budget_resource("1234567890", "999")
+        == "customers/1234567890/campaignBudgets/999"
     )
 
 

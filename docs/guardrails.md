@@ -34,7 +34,7 @@ Toda tool de mutación que capture `previous_state` obtiene automáticamente un 
 
 ```json
 {
-  "resource": "customers/5461642152/campaignBudgets/15789246902",
+  "resource": "customers/1234567890/campaignBudgets/22222222222",
   "update_mask": ["amount_micros"],
   "changes": [
     {"field": "amount_micros", "old": "3000000000", "new": "6000000000", "changed": true}

@@ -22,10 +22,12 @@ from .config import (
 from .governance import (
     audited_tool,
     create_approval,
+    get_approval,
     record_audit,
     update_approval,
     validate_approval,
 )
+from .runtime import register_login_customer
 
 
 READ_ONLY = ToolAnnotations(
@@ -264,6 +266,11 @@ def register_mcc_tools(mcp) -> None:
         for row in rows:
             client = dict(row.get("customerClient", {}))
             client_id = str(client.get("id", ""))
+            if client_id and client_id != mcc_id:
+                try:
+                    register_login_customer(client_id, mcc_id)
+                except ValueError:
+                    pass
             client["lastActivityDate"] = None
             client["activityStatus"] = (
                 "not_queried_not_whitelisted"
@@ -361,8 +368,9 @@ def register_mcc_tools(mcp) -> None:
         dry_run: bool = True,
         approval_id: Optional[str] = None,
         confirmation_text: Optional[str] = None,
+        retry_failed_from_approval_id: Optional[str] = None,
     ) -> str:
-        """Apply the same mutation across N customers under a single approval.
+        """Apply the same mutation across N customers under a single approval with partial-retry support.
 
         Currently supported operation_name values:
           - pause_campaign          (target payload: {"campaign_id": ...})
@@ -372,8 +380,9 @@ def register_mcc_tools(mcp) -> None:
         Flow: call once with dry_run=true to preview every mutation and get an
         approval_id, then call again with dry_run=false + the same targets +
         approval_id + confirmation_text ("EXECUTE BULK <N>" where N is the target
-        count). Each per-customer execution is audited individually with a shared
-        bulk_id, and per-customer failures never stop the batch.
+        count). Each per-customer execution is audited individually, and per-customer
+        failures never stop the batch. Pass `retry_failed_from_approval_id` to retry
+        only failed targets from a prior partial run.
         """
         ensure_tool_allowed("mcc_bulk_apply", write=True)
         settings = get_settings()
@@ -383,7 +392,26 @@ def register_mcc_tools(mcp) -> None:
                 "run per-client approvals instead."
             )
 
-        prepared = _prepare_bulk_targets(operation_name, targets)
+        skipped_already_executed: list[str] = []
+        effective_targets = targets
+        if retry_failed_from_approval_id:
+            prior = get_approval(retry_failed_from_approval_id)
+            if prior.get("tool_name") != "mcc_bulk_apply":
+                raise ValueError("retry_failed_from_approval_id must reference a previous mcc_bulk_apply run")
+            prior_op = (prior.get("payload") or {}).get("operation_name")
+            if prior_op and prior_op != operation_name:
+                raise ValueError(
+                    f"operation_name '{operation_name}' does not match prior bulk run '{prior_op}'"
+                )
+            failed_map = prior.get("failed_targets") or {}
+            if not failed_map:
+                raise ValueError(
+                    f"Prior bulk approval {retry_failed_from_approval_id} has no failed items to retry"
+                )
+            skipped_already_executed = list(prior.get("executed_customer_ids") or [])
+            effective_targets = dict(failed_map)
+
+        prepared = _prepare_bulk_targets(operation_name, effective_targets)
         target_count = len(prepared)
         mcc_id = _mcc_id()
         bulk_payload = {
@@ -534,24 +562,39 @@ def register_mcc_tools(mcp) -> None:
                 )
         succeeded = sum(1 for r in results if r["status"] == "executed")
         failed = target_count - succeeded
+        executed_cids = [r["customer_id"] for r in results if r["status"] == "executed"]
+        failed_targets = {
+            item["customer_id"]: item["target_payload"]
+            for item, res in zip(prepared, results)
+            if res["status"] == "error"
+        }
         update_approval(
             approval_id,
             status="executed",
             executed_count=succeeded,
             failed_count=failed,
+            executed_customer_ids=executed_cids,
+            failed_targets=failed_targets,
         )
-        return format_json(
-            {
-                "status": "completed" if failed == 0 else "partial",
-                "executed": True,
-                "approval_id": approval_id,
-                "operation_name": operation_name,
-                "target_count": target_count,
-                "executed_count": succeeded,
-                "failed_count": failed,
-                "results": results,
-            }
-        )
+        response_payload: dict[str, Any] = {
+            "status": "completed" if failed == 0 else "partial",
+            "executed": True,
+            "approval_id": approval_id,
+            "operation_name": operation_name,
+            "target_count": target_count,
+            "executed_count": succeeded,
+            "failed_count": failed,
+            "retryable_customer_ids": sorted(failed_targets),
+            "results": results,
+        }
+        if skipped_already_executed:
+            response_payload["skipped_already_executed"] = skipped_already_executed
+        if failed_targets:
+            response_payload["retry_next_step"] = (
+                f"To retry only failed targets without re-running succeeded ones, call mcc_bulk_apply "
+                f"with dry_run=true and retry_failed_from_approval_id='{approval_id}'."
+            )
+        return format_json(response_payload)
 
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool

@@ -85,6 +85,8 @@ def test_non_whitelisted_customer_blocks_mutation(agency_data, monkeypatch):
 
 
 def test_budget_cap_blocks_amount_over_limit(agency_data, monkeypatch):
+    from agency.modules import configure_tool_catalog
+
     monkeypatch.setenv("READ_ONLY_MODE", "false")
     monkeypatch.setenv("MAX_DAILY_BUDGET_INCREASE_MICROS", "1000000")
     called = []
@@ -92,19 +94,25 @@ def test_budget_cap_blocks_amount_over_limit(agency_data, monkeypatch):
         "agency.mutations.mutate",
         lambda *a, **k: called.append(True) or {},
     )
-    create_budget = server.mcp._tool_manager.get_tool("create_campaign_budget").fn
-    with pytest.raises(PermissionError):
-        create_budget(
-            customer_id="9873186703",
-            name="Over cap",
-            amount_micros=5_000_000,
-            dry_run=True,
-        )
-    # The cap is enforced before any Google Ads call is attempted.
-    assert called == []
+    configure_tool_catalog(server.mcp, preset="full", read_only=False)
+    try:
+        create_budget = server.mcp._tool_manager.get_tool("create_campaign_budget").fn
+        with pytest.raises(PermissionError):
+            create_budget(
+                customer_id="9873186703",
+                name="Over cap",
+                amount_micros=5_000_000,
+                dry_run=True,
+            )
+        # The cap is enforced before any Google Ads call is attempted.
+        assert called == []
+    finally:
+        configure_tool_catalog(server.mcp, modules=None, preset=None, read_only=True)
 
 
 def test_budget_within_cap_is_validated(agency_data, monkeypatch):
+    from agency.modules import configure_tool_catalog
+
     monkeypatch.setenv("READ_ONLY_MODE", "false")
     monkeypatch.setenv("MAX_DAILY_BUDGET_INCREASE_MICROS", "5000000")
     validate_calls = []
@@ -114,11 +122,15 @@ def test_budget_within_cap_is_validated(agency_data, monkeypatch):
             validate_calls.append(validate_only) or {"results": [{}]}
         ),
     )
-    create_budget = server.mcp._tool_manager.get_tool("create_campaign_budget").fn
-    create_budget(
-        customer_id="9873186703",
-        name="Within cap",
-        amount_micros=1_000_000,
-        dry_run=True,
-    )
-    assert validate_calls == [True]
+    configure_tool_catalog(server.mcp, preset="full", read_only=False)
+    try:
+        create_budget = server.mcp._tool_manager.get_tool("create_campaign_budget").fn
+        create_budget(
+            customer_id="9873186703",
+            name="Within cap",
+            amount_micros=1_000_000,
+            dry_run=True,
+        )
+        assert validate_calls == [True]
+    finally:
+        configure_tool_catalog(server.mcp, modules=None, preset=None, read_only=True)

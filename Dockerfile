@@ -3,12 +3,12 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MCP_TRANSPORT=streamable-http \
-    MCP_HOST=0.0.0.0 \
+    MCP_HOST=127.0.0.1 \
     MCP_PORT=8000
 
 WORKDIR /app
 
-COPY pyproject.toml README.md DESIGN.md LICENSE google_ads_server.py ./
+COPY pyproject.toml README.md DESIGN.md LICENSE google_ads_cli.py google_ads_server.py google_ads_connect.py ./
 COPY agency ./agency
 COPY config ./config
 COPY docs ./docs

@@ -25,7 +25,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .config import DATA_DIR, get_settings
+from .config import DATA_DIR, get_settings, resolve_worker_file
 
 
 AUDIT_FILE_RE = re.compile(r"^audit-(\d{4})-(\d{2})-(\d{2})\.jsonl$")
@@ -145,7 +145,7 @@ def export_audit_log(
     if until:
         _parse_iso(until)
     data_dir = data_dir or DATA_DIR
-    dest_path = Path(destination).expanduser()
+    dest_path = resolve_worker_file(Path(destination).expanduser())
     dest_path.parent.mkdir(parents=True, exist_ok=True)
 
     filters = ExportFilters(

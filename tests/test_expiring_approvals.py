@@ -31,8 +31,8 @@ def _approval(minutes_from_now, status="pending", **extra):
     return {
         "approval_id": extra.get("approval_id", "aid"),
         "tool_name": extra.get("tool_name", "update_campaign_budget"),
-        "customer_id": extra.get("customer_id", "5461642152"),
-        "client_name": extra.get("client_name", "Clariola"),
+        "customer_id": extra.get("customer_id", "1234567890"),
+        "client_name": extra.get("client_name", "Demo Account"),
         "operator": extra.get("operator", "fidel"),
         "created_at": (now - timedelta(minutes=5)).isoformat(),
         "expires_at": expires.isoformat(),

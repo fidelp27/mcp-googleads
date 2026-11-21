@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import Any, Callable
 
 from .api import batch_mutate, format_json, mutate
 from .config import client_display_name, ensure_customer_allowed, ensure_tool_allowed
 from .governance import (
+    _normalize,
     build_diff_from_operations,
     create_approval,
     find_idempotent_result,
@@ -17,6 +18,31 @@ from .governance import (
     validate_approval,
 )
 from .locks import ResourceLockedError, resource_lock
+
+
+def verify_not_stale(
+    expected_state: Any,
+    live_state: Any,
+    *,
+    fields: tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Compare snapshot state captured at dry-run against current live state.
+
+    Returns a list of drifted fields (`[{field, expected, actual}]`). Empty list
+    means the live resource matches the approved snapshot.
+    """
+    if not isinstance(expected_state, dict) or not isinstance(live_state, dict):
+        if expected_state != live_state:
+            return [{"field": "state", "expected": expected_state, "actual": live_state}]
+        return []
+    keys = list(fields) if fields else sorted(expected_state.keys())
+    drifted: list[dict[str, Any]] = []
+    for key in keys:
+        old_val = expected_state.get(key)
+        cur_val = live_state.get(key)
+        if _normalize(old_val) != _normalize(cur_val):
+            drifted.append({"field": key, "expected": old_val, "actual": cur_val})
+    return drifted
 
 
 def stable_idempotency_key(tool_name: str, customer_id: str, payload: Any) -> str:
@@ -41,6 +67,8 @@ def execute_mutation(
     previous_state: Any = None,
     idempotency_key: str | None = None,
     batch: bool = False,
+    state_verifier: Callable[[], Any] | None = None,
+    stale_state_fields: tuple[str, ...] | None = None,
 ) -> str:
     customer_id = ensure_customer_allowed(customer_id)
     ensure_tool_allowed(tool_name, write=True)
@@ -116,6 +144,29 @@ def execute_mutation(
                 "result": cached.get("result"),
             }
         )
+    if state_verifier is not None and approval.get("previous_state") is not None:
+        live_state = state_verifier()
+        drifted = verify_not_stale(
+            approval.get("previous_state"),
+            live_state,
+            fields=stale_state_fields,
+        )
+        if drifted:
+            update_approval(approval_id, status="stale", stale_diff=drifted)
+            record_audit(
+                tool_name,
+                customer_id,
+                payload,
+                "stale_state",
+                {"drifted_fields": drifted},
+                dry_run=False,
+                operation_id=approval_id,
+                previous_state=approval.get("previous_state"),
+            )
+            raise PermissionError(
+                "Stale approval: resource state in Google Ads changed after dry-run "
+                f"({', '.join(item['field'] for item in drifted)}). Request a fresh dry-run."
+            )
     try:
         lock_key = _lock_key_for(operations, approval.get("previous_state"))
         if lock_key is None:

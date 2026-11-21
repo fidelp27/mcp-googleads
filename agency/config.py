@@ -50,6 +50,18 @@ BUILTIN_CONFIGS: dict[str, Any] = {
 }
 
 
+def resolve_worker_file(path: Path) -> Path:
+    """Confine file arguments from remote tools to the profile's file directory."""
+    directory = os.getenv("MCP_REMOTE_FILES_DIR")
+    if not directory:
+        return path
+    root = Path(directory).resolve()
+    resolved = (root / path).resolve()
+    if not resolved.is_relative_to(root):
+        raise ValueError("File paths must stay within the remote worker's file directory.")
+    return resolved
+
+
 def _bool_env(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -64,11 +76,18 @@ def _csv_env(name: str) -> frozenset[str]:
 def load_json_config(filename: str, default: Any) -> Any:
     path = CONFIG_DIR / filename
     if not path.exists():
-        return BUILTIN_CONFIGS.get(filename, default)
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValueError(f"Invalid configuration file {path}: {error}") from error
+        data = BUILTIN_CONFIGS.get(filename, default)
+    else:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(f"Invalid configuration file {path}: {error}") from error
+    if filename == "clients.json" and not data:
+        from .demo import demo_clients_config, is_demo_mode
+
+        if is_demo_mode():
+            return demo_clients_config()
+    return data
 
 
 @dataclass(frozen=True)
@@ -87,6 +106,9 @@ class Settings:
 
 
 def get_settings() -> Settings:
+    from .demo import DEMO_CUSTOMER_IDS, is_demo_mode
+
+    demo = is_demo_mode()
     legacy_budget_units = float(os.getenv("MAX_DAILY_BUDGET_INCREASE_USD", "0") or 0)
     budget_cap_micros = int(
         os.getenv(
@@ -94,10 +116,11 @@ def get_settings() -> Settings:
             str(int(legacy_budget_units * 1_000_000)),
         )
     )
+    allowed = frozenset(DEMO_CUSTOMER_IDS) if demo else _csv_env("ALLOWED_CUSTOMER_IDS")
     return Settings(
-        operator_name=os.getenv("OPERATOR_NAME", "unknown"),
-        read_only_mode=_bool_env("READ_ONLY_MODE", True),
-        allowed_customer_ids=_csv_env("ALLOWED_CUSTOMER_IDS"),
+        operator_name=os.getenv("OPERATOR_NAME", "demo" if demo else "unknown"),
+        read_only_mode=True if demo else _bool_env("READ_ONLY_MODE", True),
+        allowed_customer_ids=allowed,
         blocked_tools=_csv_env("BLOCKED_TOOLS"),
         max_daily_budget_increase_micros=budget_cap_micros,
         max_budget_increase_pct=float(os.getenv("MAX_BUDGET_INCREASE_PCT", "100")),

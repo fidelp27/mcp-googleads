@@ -24,11 +24,11 @@ Cuatro tools sobre `KeywordPlanIdeaService` para investigar keywords sin gastar 
 4. `generate_keyword_historical_metrics` con esa lista corta para ver estacionalidad y competencia mes a mes.
 5. `generate_keyword_forecast` con el `cpc_bid_micros` y `daily_budget_micros` que estás evaluando para tener una proyección de clics/costo/conv antes de armar la campaña.
 
-## Ejemplo · Clariola (customer 5461642152, español, LatAm)
+## Ejemplo · Cuenta demo (customer 1234567890, español, LatAm)
 
 ```text
 generate_keyword_ideas(
-  customer_id="5461642152",
+  customer_id="1234567890",
   keywords="auditoría seo, auditoria seo, seo audit",
   geo_target_ids="2032,2484,2724",
   language_id="1003",

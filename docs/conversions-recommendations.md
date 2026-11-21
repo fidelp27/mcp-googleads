@@ -34,33 +34,35 @@ Ejecutar como primer paso de cualquier review, y siempre antes de aumentar presu
 | `DDA_NOT_AVAILABLE` | warning | Acción primary con `data_driven_model_status` distinto de `AVAILABLE`. |
 | `PRIMARY_NOT_COUNTED` | warning | Acción primary con `included_in_conversions_metric=false`. Inconsistente. |
 
-### Ejemplo (Clariola)
+### Ejemplo
 
 ```text
-get_enhanced_conversions_status(customer_id="5461642152", days=30)
+get_enhanced_conversions_status(customer_id="1234567890", days=30)
 ```
 
 Devuelve 3 conversion actions, 2 alerts (`CUSTOMER_DATA_TERMS_NOT_ACCEPTED` + `NO_CONVERSIONS_IN_WINDOW`) y summary con `customer_data_terms_accepted=false`.
 
-## Consent signal coverage — proxy vía attribution rate
+## Cobertura de medición (`conversions` vs `all_conversions`) y configuración de datos
 
-`check_consent_signal_coverage(customer_id, days=30)` es el proxy honesto para detectar degradación de Consent Mode / EC. La Google Ads API **no expone per-evento** `ad_user_data` ni `ad_personalization` — esos parámetros viven en el `gtag('consent', ...)` client-side. Lo que **sí** entrega la API es el ratio `conversions / all_conversions` por campaña, comparable período vs período previo. Cuando la ratio cae abruptamente, casi siempre es tag o consent roto.
+`check_consent_signal_coverage(customer_id, days=30)` audita la configuración de seguimiento a nivel cuenta (`accepted_customer_data_terms`, `enhanced_conversions_for_leads_enabled`, `conversion_tracking_status`) y compara el cociente `conversions / all_conversions` por campaña frente al período previo.
+
+> **Importante:** La Google Ads API **no expone por evento** `ad_user_data` ni `ad_personalization` (esos parámetros se envían desde el tag client-side). El cociente `conversions / all_conversions` refleja una **diferencia de medición** entre conversiones primarias (usadas para pujar) y todas las conversiones registradas (incluyendo secundarias/micro-conversiones); **no debe interpretarse como prueba de fallo de Consent Mode**.
 
 ### Qué devuelve
 
 - **tracking:** `accepted_customer_data_terms`, `enhanced_conversions_for_leads_enabled`, `conversion_tracking_status`.
-- **campaigns:** por cada campaña con actividad — attributed / total conversions, attribution rate y delta en puntos porcentuales vs el período anterior de igual longitud.
-- **summary:** `account_attribution_rate`, totales, N campañas evaluadas.
-- **alerts:** priorizadas.
-- **notes:** disclaimer explícito sobre la limitación de la API.
+- **campaigns:** por cada campaña con actividad — conversiones primarias (`conversions`), totales (`all_conversions`), ratio y delta en puntos porcentuales vs el período anterior de igual longitud.
+- **summary:** `account_primary_to_all_ratio` (`account_attribution_rate`), totales y N campañas evaluadas.
+- **alerts:** priorizadas sin falsos positivos de consentimiento.
+- **notes:** disclaimer explícito sobre la limitación de la API y la interpretación correcta del ratio.
 
 ### Alertas
 
 | Código | Severidad | Cuándo |
 |---|---|---|
-| `ZERO_ATTRIBUTED_WITH_TOTAL` | critical | Total > 0 pero attributed = 0. gclid o Consent Mode roto seguro. |
-| `LOW_ATTRIBUTION_RATE` | high | Rate < 30% con ≥5 conversiones totales. |
-| `ATTRIBUTION_DROP` | high | Caída ≥20pp vs período anterior. |
+| `ZERO_PRIMARY_WITH_ALL_CONVERSIONS` | warning | `all_conversions > 0` pero `conversions = 0`. Revisar si solo disparan acciones secundarias o si cambiaron objetivos/seguimiento. |
+| `LOW_PRIMARY_CONVERSION_SHARE` | info | Ratio < 30% con ≥5 `all_conversions`. Diferencia de medición habitual cuando existen acciones secundarias; no implica fallo de Consent Mode por sí sola. |
+| `PRIMARY_SHARE_DROP` | warning | Caída ≥20pp vs período anterior. Revisar cambios recientes en acciones primarias/secundarias, objetivos de campaña, tags o Consent Mode. |
 | `CUSTOMER_DATA_TERMS_NOT_ACCEPTED` | warning | Términos no aceptados a nivel cuenta. |
 | `UNEXPECTED_TRACKING_STATUS` | info | `conversion_tracking_status` fuera del conjunto conocido. |
 | `NO_DATA_TO_ASSESS` | info | Cero conversiones en ambos períodos. |

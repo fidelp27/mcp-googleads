@@ -286,6 +286,54 @@ def register_governance_tools(mcp) -> None:
                     "updateMask": "status",
                 }
             ]
+        elif tool == "update_keyword_bid":
+            resource_name = previous.get("resourceName")
+            bid = previous.get("cpcBidMicros")
+            if not resource_name or bid is None:
+                raise ValueError("Previous keyword bid is not available")
+            service = "adGroupCriteria"
+            operations = [
+                {
+                    "update": {"resourceName": resource_name, "cpcBidMicros": str(bid)},
+                    "updateMask": "cpc_bid_micros",
+                }
+            ]
+        elif tool in {"pause_keyword", "enable_keyword"}:
+            resource_name = previous.get("resourceName")
+            status = previous.get("status")
+            if not resource_name or not status:
+                raise ValueError("Previous keyword status is not available")
+            service = "adGroupCriteria"
+            operations = [
+                {
+                    "update": {"resourceName": resource_name, "status": status},
+                    "updateMask": "status",
+                }
+            ]
+        elif tool == "set_conversion_action_primary":
+            resource_name = previous.get("resourceName")
+            primary = previous.get("primaryForGoal")
+            if not resource_name or primary is None:
+                raise ValueError("Previous primary_for_goal state is not available")
+            service = "conversionActions"
+            operations = [
+                {
+                    "update": {"resourceName": resource_name, "primaryForGoal": bool(primary)},
+                    "updateMask": "primary_for_goal",
+                }
+            ]
+        elif tool == "update_campaign_conversion_goal":
+            resource_name = previous.get("resourceName")
+            biddable = previous.get("biddable")
+            if not resource_name or biddable is None:
+                raise ValueError("Previous campaign conversion goal biddable state is not available")
+            service = "campaignConversionGoals"
+            operations = [
+                {
+                    "update": {"resourceName": resource_name, "biddable": bool(biddable)},
+                    "updateMask": "biddable",
+                }
+            ]
         else:
             raise ValueError(f"Automatic revert is not supported for {tool}")
         return execute_mutation(

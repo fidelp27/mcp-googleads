@@ -11,8 +11,8 @@ import pytest
 from agency import mcc_tools
 
 
-CID_1 = "5461642152"
-CID_2 = "5461642152"  # same customer; tests only need it to pass allowlist
+CID_1 = "1234567890"
+CID_2 = "1234567890"  # same customer; tests only need it to pass allowlist
 
 
 @pytest.fixture(autouse=True)
@@ -225,7 +225,7 @@ def test_prepare_returns_customer_ordered_items(monkeypatch):
     prepared = mcc_tools._prepare_bulk_targets(
         "pause_campaign",
         {
-            "5461642152": {"campaign_id": "1"},
+            "1234567890": {"campaign_id": "1"},
             "9876543210": {"campaign_id": "2"},
         },
     )
@@ -238,7 +238,7 @@ def test_prepare_returns_customer_ordered_items(monkeypatch):
 
 def test_prepare_bubbles_builder_error_with_customer_context(monkeypatch):
     _patch_search(monkeypatch, {"FROM campaign": [{"campaign": {"status": "ENABLED"}}]})
-    with pytest.raises(ValueError, match=r"targets\[5461642152\]"):
+    with pytest.raises(ValueError, match=r"targets\[1234567890\]"):
         mcc_tools._prepare_bulk_targets(
-            "pause_campaign", {"5461642152": {}}
+            "pause_campaign", {"1234567890": {}}
         )

@@ -8,7 +8,7 @@ import pytest
 from agency import offline_conversions_tools as oc
 
 
-CID = "5461642152"
+CID = "1234567890"
 
 
 def _sha256(value: str) -> str:
@@ -92,7 +92,7 @@ def test_click_conversion_with_gclid_and_consent():
     entry = oc._build_click_conversion(
         CID,
         {
-            "conversion_action_id": "7693341777",
+            "conversion_action_id": "1000000001",
             "conversion_date_time": "2026-08-16 12:00:00-03:00",
             "conversion_value": 100.0,
             "currency_code": "usd",
@@ -100,7 +100,7 @@ def test_click_conversion_with_gclid_and_consent():
             "consent": _consent(),
         },
     )
-    assert entry["conversionAction"] == f"customers/{CID}/conversionActions/7693341777"
+    assert entry["conversionAction"] == f"customers/{CID}/conversionActions/1000000001"
     assert entry["conversionDateTime"] == "2026-08-16 12:00:00-03:00"
     assert entry["conversionValue"] == 100.0
     assert entry["currencyCode"] == "USD"

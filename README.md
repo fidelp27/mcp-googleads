@@ -1,420 +1,414 @@
-# Google Ads MCP
+# Google Ads MCP Server (`google-ads-mcp-server`)
 
-Servidor MCP de operación para agencias: consulta, audita, crea y administra cuentas de Google Ads desde Claude, ChatGPT, Codex y cualquier cliente compatible con Model Context Protocol.
+> **Español:** Ver la [guía rápida y ejemplos por rol en español](docs/es/README.md) y la [guía de conexión](docs/connect.md).
 
-Incluye 124 herramientas MCP, guardarraíles obligatorios, reporting white-label y soporte MCC. Puede ejecutarse localmente por `stdio` o publicarse mediante Streamable HTTP.
+An open-source, **read-only-by-default** **Model Context Protocol (MCP)** server for auditing, reporting, diagnosing, and safely managing Google Ads accounts from desktop and CLI AI apps (**Claude Desktop, Claude Code, Codex, Antigravity, Gemini CLI, Cherry Studio / Cline / Cursor / VS Code with DeepSeek, Kimi, OpenAI, Anthropic, or Gemini**).
 
-## Funcionalidades
+Built to complement Google's official MCP server with **142 structured tools** (74 read/diagnostic/analytics tools + 68 opt-in guarded write/governance tools), **10 modular domains**, **5 one-word presets**, **editable Markdown + TOML analysis profiles**, **account-timezone & truncation-safe analytics**, **multi-currency & multi-MCC orchestration**, and **human-in-the-loop write guardrails**.
 
-- Lectura completa de campañas, anuncios, keywords, search terms, conversiones, geo, dispositivos, horarios, audiencias, presupuestos e historial.
-- Ciclo de vida de campañas Search, Performance Max y Display.
-- Presupuestos, estrategias de puja, bids, segmentación geográfica y schedules.
-- Ad groups, RSA, call ads, asset groups PMax, keywords y negativas.
-- Audiencias, Customer Match con confirmación de consentimiento, assets y extensiones.
-- Recomendaciones oficiales, conversion actions y operaciones MCC.
-- Reportes por cliente, dashboard de agencia, comparación de períodos, waste, optimización y alertas.
-- Templates, presets regionales y branding configurable.
-- Auditoría append-only, dry-run real, approvals, whitelist, caps, bloqueo por herramienta e idempotencia.
-- Transportes MCP `stdio` y Streamable HTTP.
+---
 
-Las escrituras están bloqueadas por defecto con `READ_ONLY_MODE=true`. Cuando se habilitan, ninguna mutation se ejecuta directamente: primero debe validarse con `dry_run=true`, Google Ads recibe `validateOnly=true` y el servidor emite un `approval_id`. La ejecución exige repetir exactamente el payload con `dry_run=false`.
+## Table of Contents
 
-## Compatibilidad
+1. [What This MCP Does (Overview)](#what-this-mcp-does-overview)
+2. [Quickstart in 30 Seconds (`--demo`)](#quickstart-in-30-seconds---demo)
+3. [Connect Real Accounts (`connect` + `doctor` + `register`)](#connect-real-accounts-connect--doctor--register)
+4. [Modular Tool Catalog & Presets (`--preset` / `--modules`)](#modular-tool-catalog--presets---preset----modules)
+5. [Complete Functionality & Tool Reference (All 142 Tools)](#complete-functionality--tool-reference-all-142-tools)
+   - [Core Module (25 tools — loaded by default)](#1-core-module-25-tools--loaded-by-default)
+   - [Diagnostics Module (5 tools)](#2-diagnostics-module-5-tools)
+   - [Measurement Module (8 tools)](#3-measurement-module-8-tools)
+   - [Search Module (16 tools)](#4-search-module-16-tools)
+   - [Performance Max Module (8 tools)](#5-performance-max-module-8-tools)
+   - [Shopping Module (6 tools)](#6-shopping-module-6-tools)
+   - [Display Module (5 tools)](#7-display-module-5-tools)
+   - [Demand Gen Module (5 tools)](#8-demand-gen-module-5-tools)
+   - [MCC & Agency Governance Read Module (11 tools)](#9-mcc--agency-governance-read-module-11-tools)
+   - [Operations Module (68 guarded write & governance tools — opt-in only)](#10-operations-module-68-guarded-write--governance-tools--opt-in-only)
+6. [MCP Prompts & Resources](#mcp-prompts--resources)
+7. [Customizable Analysis Profiles (Markdown + TOML)](#customizable-analysis-profiles-markdown--toml)
+8. [CLI Commands & Scheduled Alerts](#cli-commands--scheduled-alerts)
+9. [Data Accuracy, Truncation & Safety Architecture](#data-accuracy-truncation--safety-architecture)
+10. [Client Compatibility & Self-Hosted HTTP](#client-compatibility--self-hosted-http)
+11. [Development & Documentation](#development--documentation)
 
-| Cliente | Transporte | Uso |
-|---|---|---|
-| Claude Desktop | `stdio` | Servidor local |
-| ChatGPT Desktop con Codex | `stdio` | Servidor local |
-| Codex CLI / IDE | `stdio` | Servidor local |
-| ChatGPT web u otro cliente remoto | Streamable HTTP | Servidor desplegado con HTTPS |
+---
 
-ChatGPT Desktop con Codex, Codex CLI y la extensión de IDE comparten la configuración de `~/.codex/config.toml`. ChatGPT web no puede acceder directamente a `localhost`: necesita un endpoint remoto HTTPS o un túnel seguro.
+## What This MCP Does (Overview)
 
-## Requisitos
+- **Zero-credential `--demo` sandbox:** Test the full read/reporting/audit workflow in 30 seconds against two synthetic accounts (`1111111111` EUR ecommerce in `Europe/Madrid` + `2222222222` USD B2B Leads in `America/New_York`) before touching Google Cloud.
+- **Guided desktop onboarding & preflight (`connect`, `register`, `doctor`, `serve`):** Browser OAuth flow, direct & multi-account/MCC scoping (`--all-mcc-clients`), preset persistence (`--preset`, `--modules`), and actionable diagnostics (`doctor` / `doctor --offline` / `doctor --json`) that separate credential errors, Cloud project access-level limits, permission issues, and zero-data test accounts.
+- **Compact modular tool surface:** Default `core` exposes **25 focused tools** (strictly validated against a multi-AI JSON Schema linter with no untyped `dict[str, Any]` parameters) so tool calling stays accurate and low-token across Claude, OpenAI, Gemini, DeepSeek, and Kimi.
+- **360° operational diagnostics:**
+  - **Delivery & policy:** Combines account status, `billing_setup`, `account_budget`, campaign serving reasons, impression share losses, and ad/asset/keyword disapprovals into `confirmed_causes`, `hypotheses`, and `insufficient_data`.
+  - **Budget pacing:** Month-to-date spend, 7-day vs. MTD run rate, end-of-month projection, remaining budget, and required daily spend in the account's time zone.
+  - **Channel depth:** Search (terms, n-gram clusters, Quality Score 3-component breakdown, RSA Ad Strength, Keyword Planner, Experiments, Auction Insights API + EN/ES UI CSV fallback), Performance Max (asset groups, v25 asset `primary_status`/approvals, signals, listing filters, per-campaign search themes with explicit sampling coverage, placements), Shopping (SKU/brand/category/product-group ROAS & wasted spend), Display & Demand Gen (placements, mobile-app waste, video view rate & quartile funnel `p25/p50/p75/p100`).
+- **Conversion & offline measurement audits:** Maps conversion ownership (account vs. MCC), account/campaign/custom goals (`conversion_goal_campaign_config`), secondary actions promoted into custom goals, Smart Bidding alignment, double-counting risks, Enhanced Conversions prerequisites, honest primary-vs-all measurement scope (never false-positive Consent Mode claims), offline upload health without PII, and **Data Manager API** upgrade eligibility.
+- **Trustworthy reporting & multi-currency/multi-MCC accuracy:** Account-timezone closed days (`complete_days_only=True`), `queried_at_utc`, `conversion_lag_warning`, interaction-date vs. `conversions_by_conversion_date` time series, separated per-currency agency totals, dynamic per-account `login-customer-id` routing, row caps (`GOOGLE_ADS_MAX_SEARCH_ROWS`) with `truncated` / `totals_are_partial`, and automatic downgrade of absence-based alerts to `insufficient_data` when backing queries are truncated.
+- **Guarded write engine (opt-in only):** When `READ_ONLY_MODE=true` (the default, and always enforced in managed desktop profiles), all 68 write tools in `operations` are **omitted from `tools/list`**. When explicitly enabled (`READ_ONLY_MODE=false`), mutations enforce mandatory `dry_run=true` (`validateOnly=true`) previews with diffs, exact confirmation phrases, economic caps, optimistic locking (`state_verifier`), partial retry for multi-account batches (`mcc_bulk_apply`), PII-redacted append-only audit logs, and `revert_operation`.
 
-- Python 3.11 o superior.
-- Una cuenta de Google Ads, preferiblemente vinculada a una cuenta administradora.
-- Un proyecto de Google Cloud con Google Ads API habilitada.
-- Un Developer Token de Google Ads.
-- Credenciales OAuth de usuario o una cuenta de servicio.
-- Claude, ChatGPT, Codex u otro cliente MCP.
+---
 
-El servidor usa Google Ads API `v25` por defecto. Las versiones retiradas dejan de funcionar; revisa el [calendario oficial de versiones](https://developers.google.com/google-ads/api/docs/sunset-dates) antes de cambiar `GOOGLE_ADS_API_VERSION`.
-
-## Instalación rápida
-
-### Windows
-
-```powershell
-.\scripts\setup.ps1
-Copy-Item .env.example .env
-```
-
-### macOS o Linux
+## Quickstart in 30 Seconds (`--demo`)
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install -e ".[dev]"
-cp .env.example .env
+pip install google-ads-mcp-server
+# or from a local checkout:
+# pip install -e ".[dev]"
+
+# Register zero-credential demo mode in your desktop AI client:
+google-ads-mcp-server register --client claude-desktop --demo
+# Optional: include domain modules via --preset (e.g. leads, ecommerce, agency, full):
+google-ads-mcp-server register --client generic --demo --preset ecommerce
 ```
 
-La instalación de Windows también genera ejemplos listos para copiar en `generated/`.
-
-## Cómo obtener las credenciales
-
-Google Ads API requiere dos mecanismos diferentes:
-
-1. **Developer Token:** identifica el software que llama a la API.
-2. **OAuth 2.0:** identifica al usuario o cuenta de servicio que tiene acceso a las cuentas publicitarias.
-
-Tener uno no reemplaza al otro. También necesitarás el ID de la cuenta administradora cuando consultes cuentas cliente mediante un MCC.
-
-### 1. Crear o elegir una cuenta administradora
-
-El Developer Token solo se obtiene desde una [cuenta administradora de Google Ads](https://ads.google.com/home/tools/manager-accounts/).
-
-1. Entra en tu cuenta administradora.
-2. Vincula las cuentas publicitarias que quieras consultar.
-3. Conserva su ID de diez dígitos; será el valor de `GOOGLE_ADS_LOGIN_CUSTOMER_ID`.
-
-El ID puede escribirse con o sin guiones. No coloques aquí el ID de la cuenta cliente que consultarás, sino el de la cuenta administradora usada para acceder a ella.
-
-### 2. Solicitar el Developer Token
-
-1. Inicia sesión en la cuenta administradora.
-2. Abre el [API Center de Google Ads](https://ads.google.com/aw/apicenter).
-3. Completa el formulario de acceso y acepta los términos.
-4. Copia el Developer Token y guárdalo como `GOOGLE_ADS_DEVELOPER_TOKEN`.
-
-Google puede asignar acceso de prueba o Explorer inicialmente. El nivel otorgado determina si puedes consultar cuentas de producción y cuántas operaciones puedes realizar. Consulta la documentación oficial sobre el [Developer Token](https://developers.google.com/google-ads/api/docs/api-policy/developer-token) y sus [niveles de acceso](https://developers.google.com/google-ads/api/docs/api-policy/access-levels).
-
-Trata este token como una contraseña. Si se filtra, restablécelo desde el API Center.
-
-### 3. Crear un proyecto de Google Cloud
-
-1. Abre la [consola de Google Cloud](https://console.cloud.google.com/).
-2. Crea un proyecto o selecciona uno dedicado a esta integración.
-3. Habilita la [Google Ads API](https://console.cloud.google.com/apis/library/googleads.googleapis.com).
-4. Elige uno de los métodos siguientes.
-
-No reutilices sin revisar un proyecto que ya fue usado con el Developer Token de otra cuenta administradora. Google vincula el proyecto y el token, y una combinación incompatible puede producir `DEVELOPER_TOKEN_PROHIBITED`.
-
-### Opción A: OAuth de usuario
-
-Es la opción más directa para desarrollo local o una instalación usada por una sola persona.
-
-1. En Google Cloud abre **Google Auth Platform**.
-2. Configura la pantalla de consentimiento.
-3. Agrega el scope `https://www.googleapis.com/auth/adwords`.
-4. Si la aplicación está en modo de prueba, agrega como usuario de prueba la cuenta de Google que tiene acceso a Google Ads.
-5. Crea un cliente OAuth del tipo **Desktop app**.
-6. Descarga el JSON y guárdalo fuera del repositorio, por ejemplo:
-
-```text
-C:\Users\TU_USUARIO\.secrets\google-ads\client_secret.json
-```
-
-7. Configura `.env`:
-
-```dotenv
-GOOGLE_ADS_AUTH_TYPE=oauth
-GOOGLE_ADS_CREDENTIALS_PATH=C:/Users/TU_USUARIO/.secrets/google-ads/client_secret.json
-GOOGLE_ADS_TOKEN_PATH=C:/Users/TU_USUARIO/.secrets/google-ads/google_ads_token.json
-GOOGLE_ADS_DEVELOPER_TOKEN=tu_developer_token
-GOOGLE_ADS_LOGIN_CUSTOMER_ID=1234567890
-```
-
-8. Autoriza el acceso:
-
-```powershell
-.\.venv\Scripts\python.exe .\scripts\authorize_oauth.py
-```
-
-Se abrirá el navegador. Inicia sesión con un usuario que tenga acceso a las cuentas de Google Ads y acepta el permiso solicitado. El proyecto guardará un refresh token en `GOOGLE_ADS_TOKEN_PATH` y lo renovará automáticamente.
-
-No uses la misma ruta para `GOOGLE_ADS_CREDENTIALS_PATH` y `GOOGLE_ADS_TOKEN_PATH`: el primer archivo contiene el cliente OAuth y el segundo contiene la autorización del usuario.
-
-También puedes proporcionar `GOOGLE_ADS_CLIENT_ID` y `GOOGLE_ADS_CLIENT_SECRET` sin un archivo de cliente, pero el JSON descargado reduce errores de configuración. Consulta el flujo oficial de [autenticación para un solo usuario](https://developers.google.com/google-ads/api/docs/oauth/single-user-authentication).
-
-### Opción B: cuenta de servicio
-
-Es la opción recomendada para automatizaciones, servidores y procesos que no deben depender de una sesión humana.
-
-1. En Google Cloud abre **IAM y administración → Cuentas de servicio**.
-2. Crea una cuenta de servicio dedicada.
-3. Crea y descarga una clave JSON.
-4. En Google Ads abre **Administración → Acceso y seguridad**.
-5. Agrega el correo de la cuenta de servicio como usuario con el nivel de acceso mínimo necesario.
-6. Si administras muchas cuentas, agrega la cuenta de servicio al MCC en lugar de hacerlo cuenta por cuenta.
-7. Configura `.env`:
-
-```dotenv
-GOOGLE_ADS_AUTH_TYPE=service_account
-GOOGLE_ADS_CREDENTIALS_PATH=/ruta/segura/google-ads-service-account.json
-GOOGLE_ADS_DEVELOPER_TOKEN=tu_developer_token
-GOOGLE_ADS_LOGIN_CUSTOMER_ID=1234567890
-GOOGLE_ADS_IMPERSONATION_EMAIL=
-```
-
-En el flujo habitual no necesitas `GOOGLE_ADS_IMPERSONATION_EMAIL`: Google Ads puede conceder acceso directamente al correo de la cuenta de servicio. La impersonación solo aplica si tu organización configuró delegación de todo el dominio.
-
-No subas la clave JSON al repositorio ni la incluyas dentro de una imagen Docker. Consulta el flujo oficial para [cuentas de servicio](https://developers.google.com/google-ads/api/docs/oauth/service-accounts).
-
-### 4. Comprobar la configuración
-
-Primero inicia el servidor y ejecuta la herramienta:
-
-```text
-server_status
-```
-
-Debe devolver `"ready": true`. Luego ejecuta la prueba contra la API real:
-
-```powershell
-.\.venv\Scripts\python.exe .\scripts\smoke_google_ads.py
-```
-
-La prueba lista cuentas accesibles, obtiene la moneda y consulta siete días de rendimiento. No modifica datos.
-
-## Variables de entorno
-
-| Variable | Obligatoria | Descripción |
-|---|---:|---|
-| `GOOGLE_ADS_AUTH_TYPE` | Sí | `oauth` o `service_account`. |
-| `GOOGLE_ADS_CREDENTIALS_PATH` | Sí | JSON del cliente OAuth, token autorizado o clave de cuenta de servicio. |
-| `GOOGLE_ADS_TOKEN_PATH` | OAuth | Archivo separado donde se guarda el token autorizado. |
-| `GOOGLE_ADS_DEVELOPER_TOKEN` | Sí | Token obtenido en el API Center de la cuenta administradora. |
-| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | Según acceso | ID del MCC usado para acceder a cuentas cliente. |
-| `GOOGLE_ADS_CLIENT_ID` | Alternativa OAuth | Cliente OAuth si no se usa un JSON de cliente. |
-| `GOOGLE_ADS_CLIENT_SECRET` | Alternativa OAuth | Secreto OAuth si no se usa un JSON de cliente. |
-| `GOOGLE_ADS_IMPERSONATION_EMAIL` | No | Usuario delegado por una cuenta de servicio. |
-| `GOOGLE_ADS_HTTP_TIMEOUT_SECONDS` | No | Timeout por solicitud; valor predeterminado: `30`. |
-| `GOOGLE_ADS_API_VERSION` | No | Versión REST; valor predeterminado: `v25`. |
-| `MCP_TRANSPORT` | No | `stdio` o `streamable-http`. |
-| `MCP_HOST` | No | Dirección HTTP; valor predeterminado: `127.0.0.1`. |
-| `MCP_PORT` | No | Puerto HTTP; valor predeterminado: `8000`. |
-| `OPERATOR_NAME` | Sí para agencia | Identidad incluida en cada entrada de auditoría. |
-| `GOOGLE_ADS_DATA_DIR` | No | Carpeta local para auditoría, approvals y contexto. |
-| `READ_ONLY_MODE` | Sí | `true` bloquea todas las mutations; es el valor inicial recomendado. |
-| `ALLOWED_CUSTOMER_IDS` | Sí para escritura | Whitelist separada por comas; debe incluir MCC y clientes permitidos. |
-| `BLOCKED_TOOLS` | No | Herramientas deshabilitadas para esta instancia u operador. |
-| `MAX_DAILY_BUDGET_INCREASE_MICROS` | Sí para escritura | Aumento absoluto máximo por operación, en micros de la moneda de la cuenta. |
-| `MAX_BUDGET_INCREASE_PCT` | Sí para escritura | Aumento porcentual que dispara o limita cambios grandes. |
-| `MAX_BID_MICROS` | Sí para escritura | Bid máximo permitido. |
-| `GOOGLE_ADS_RATE_LIMIT_PER_MINUTE` | No | Límite local por cuenta. |
-| `APPROVAL_TTL_MINUTES` | No | Vigencia de un preview validado. |
-| `CLIENT_APPROVAL_REQUIRED` | No | Exige aprobación cliente-side antes de ejecutar. |
-| `AUDIT_RETENTION_DAYS` | No | Política operativa de conservación del log. |
-
-## Herramientas MCP
-
-| Dominio | Capacidades |
-|---|---|
-| Lectura | Cuentas, campañas, ads, keywords, search terms, geo, dispositivos, horarios, audiencias, conversiones, cambios, bids, presupuestos y shared sets. |
-| Campañas | Crear Search/PMax/Display, clonar, actualizar, pausar, habilitar, remover, geo y schedule. |
-| Estructura | Presupuestos, ad groups, RSA, call ads, asset groups PMax y templates. |
-| Keywords | Altas batch, bids, estados, negativas individuales/bulk y listas compartidas. |
-| Keyword Planner | Sugerencias, históricos, forecast y lookup de geo target constants (sin gastar presupuesto). |
-| Audiencias | Targeting/observation, modifiers y Customer Match. |
-| Assets | Sitelinks, callouts, snippets, llamadas, imágenes y links a campañas. |
-| Optimización | Recomendaciones de Google, waste detection, alertas y planes accionables. |
-| Agencia | Reportes white-label, dashboard consolidado, comparación de períodos y MCC. |
-| Governance | Auditoría, approvals, aprobación cliente-side, rechazo y reversión soportada. |
-
-Los rangos `days` aceptan entre 1 y 365 días. Los costos de Google Ads se reciben en micros: `1.000.000` micros equivale a una unidad de la moneda de la cuenta.
-
-Los runbooks completos están en:
-
-- `docs/campaigns.md`
-- `docs/keywords.md`
-- `docs/keyword-planner.md`
-- `docs/experiments.md`
-- `docs/demand-gen.md`
-- `docs/offline-conversions.md`
-- `docs/guardrails.md`
-- `docs/agency-playbook.md`
-- `docs/client-facing.md`
-- `docs/reporting.md`
-
-También están disponibles como recursos MCP bajo `agency://docs/{domain}`.
-
-### Flujo seguro de escritura
-
-1. Ejecuta `server_status`.
-2. Ejecuta `get_client_context` y confirma cliente, moneda y campañas.
-3. Reúne evidencia con herramientas de lectura.
-4. Llama la herramienta de escritura con `dry_run=true`.
-5. Revisa el cliente, payload, caps y resultado de `validateOnly`.
-6. Si corresponde, registra la aprobación del cliente con `approve_operation`.
-7. Repite exactamente la llamada con `dry_run=false`, `approval_id` y `confirmation_text`.
-8. Conserva el `audit_id` y verifica el estado con una herramienta de lectura.
-
-Ejemplos de pedidos para el asistente:
-
-```text
-Lista mis cuentas accesibles y dime la moneda de cada una.
-```
-
-```text
-Analiza el rendimiento de campañas de los últimos 30 días y señala gasto sin conversiones.
-```
-
-```text
-Compara las imágenes publicitarias por CTR y conversiones de los últimos 14 días.
-```
-
-Para crear consultas propias, revisa la [documentación oficial de GAQL](https://developers.google.com/google-ads/api/docs/query/overview) y los ejemplos incluidos en `docs/`.
-
-## Configurar clientes MCP
-
-### Claude Desktop
-
-En Windows, `scripts/setup.ps1` genera `generated/claude_desktop_config.snippet.json`. Copia la entrada `googleAdsMcp` dentro de `mcpServers` en:
-
-```text
-%APPDATA%\Claude\claude_desktop_config.json
-```
-
-Configuración equivalente:
-
-```json
-{
-  "mcpServers": {
-    "googleAdsMcp": {
-      "command": "powershell.exe",
-      "args": [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        "C:\\RUTA\\AL\\PROYECTO\\scripts\\run_stdio.ps1"
-      ]
-    }
-  }
-}
-```
-
-Reinicia Claude Desktop después del cambio.
-
-### ChatGPT Desktop y Codex
-
-Agrega esta entrada a `C:\Users\TU_USUARIO\.codex\config.toml`:
-
-```toml
-[mcp_servers.google_ads_mcp]
-enabled = true
-command = 'C:\RUTA\AL\PROYECTO\.venv\Scripts\google-ads-mcp.exe'
-args = ["--transport", "stdio"]
-cwd = 'C:\RUTA\AL\PROYECTO'
-startup_timeout_sec = 30
-tool_timeout_sec = 120
-```
-
-Reinicia el cliente para que vuelva a descubrir las herramientas.
-
-### Ejecución manual
-
-Servidor local por `stdio`:
+Or run directly over `stdio`:
 
 ```bash
-google-ads-mcp --transport stdio
+google-ads-mcp-server --transport stdio --demo --preset ecommerce
 ```
 
-Servidor HTTP:
+Example prompts to try immediately in demo mode:
+- *"List my accessible accounts and build a multi-currency agency dashboard."*
+- *"Load the `leads-audit` analysis profile and audit account `2222222222`."*
+- *"Diagnose delivery issues, budget pacing, and wasted search terms on account `1111111111`."*
+- *"Run `get_pmax_diagnostics` and `get_shopping_performance` on account `1111111111`."*
+
+---
+
+## Connect Real Accounts (`connect` + `doctor` + `register`)
+
+1. Enable **Google Ads API** in a Google Cloud project and download a **Desktop app** OAuth client JSON ([detailed setup guide](docs/connect.md)).
+2. Authorize in your browser, select account(s) and optional preset/modules, and run `doctor`:
 
 ```bash
-google-ads-mcp --transport streamable-http --host 0.0.0.0 --port 8000
+# Direct account with default compact catalog (`core`, 25 tools)
+google-ads-mcp-server connect --client claude-desktop --customer 1234567890 --oauth-client /path/to/client_secret.json
+
+# Direct account with ecommerce modules (PMax, Shopping, Measurement, Diagnostics)
+google-ads-mcp-server connect --client codex --customer 1234567890 --preset ecommerce --oauth-client /path/to/client_secret.json
+
+# MCC account scoping all enabled child accounts
+google-ads-mcp-server connect --client antigravity --manager 9999999999 --all-mcc-clients --preset agency --oauth-client /path/to/client_secret.json
+
+# Reuse the saved profile in another client
+google-ads-mcp-server register --client gemini-cli --preset leads
+
+# Verify credentials, API access, currency/timezone, and recent data
+google-ads-mcp-server doctor
 ```
 
-El endpoint local queda en `http://127.0.0.1:8000/mcp`.
+Supported `--client` targets: `claude-desktop`, `claude-code`, `codex`, `antigravity`, `gemini-cli`, `generic` (outputs standard `{"mcpServers": ...}` JSON for Cursor, VS Code, Cherry Studio, Cline, Kimi CLI, etc.).
 
-## Despliegue remoto
+Managed profiles **always** launch with `READ_ONLY_MODE=true` and scope access strictly to the authorized customer IDs (plus manager ID if configured).
 
-Construye la imagen:
+---
+
+## Modular Tool Catalog & Presets (`--preset` / `--modules`)
+
+Instead of overwhelming LLMs with all 142 tools at once, only `core` (**25 tools**) loads by default. Activate domain modules with `--preset` or `--modules` (in `connect`, `register`, `serve`, CLI flags, or `GOOGLE_ADS_PRESET` / `GOOGLE_ADS_MODULES`):
+
+| Preset | Active Modules | Active Tools (Read-Only) | Best For |
+| --- | --- | :---: | --- |
+| `core` *(default)* | `core` | 25 | Account overview, GAQL, trends, reports, waste, alerts, analysis profiles |
+| `leads` | `core, diagnostics, measurement, search` | 54 | Search lead-gen audits, conversions, delivery, pacing, keywords, RSAs |
+| `ecommerce` | `core, diagnostics, measurement, pmax, shopping` | 47 | PMax asset groups & placements, Shopping SKU/brand ROAS, pacing, tracking |
+| `agency` | `core, diagnostics, measurement, search, pmax, mcc` | 71 | Multi-account MCC operations, multi-currency dashboards, weekly reviews |
+| `full` | All read modules (+ `operations` **only** if `READ_ONLY_MODE=false`) | 74 *(142 when writes enabled)* | Full power-user read or read+write surface |
+
+Fine-grained selection example:
 
 ```bash
-docker build -t google-ads-mcp .
+google-ads-mcp-server --transport stdio --modules core,diagnostics,measurement,pmax
 ```
 
-Ejemplo de ejecución:
+> **Hard safety invariant:** While `READ_ONLY_MODE=true` (default), all **68 tools** in `operations` are **completely excluded from `tools/list`** even when `--preset full` is passed.
+
+---
+
+## Complete Functionality & Tool Reference (All 142 Tools)
+
+### 1. `core` Module (25 tools — loaded by default)
+
+Account discovery, safe GAQL, core campaign/ad/creative read, time-series trends, reports, waste detection, alerts, and customizable analysis profiles.
+
+| Tool | What It Does |
+| --- | --- |
+| `server_status` | Reports server readiness, auth mode, API version, guardrail posture (`read_only_mode`, scoped accounts), and active tool catalog/modules. |
+| `list_accounts` | Lists accessible Google Ads customer IDs (or synthetic accounts in `--demo` mode). |
+| `get_account_currency` | Retrieves account currency code and metadata. |
+| `list_resources` | Queries `googleAdsFieldService` to list available Google Ads API resources for GAQL discovery. |
+| `execute_gaql_query` | Runs a read-only GAQL query via the core server endpoint (formatted summary output). |
+| `run_gaql` | Runs a read-only GAQL query via the agency engine with bounded row protection and structured JSON output. |
+| `get_campaign_performance` | Campaign metrics (impressions, clicks, CTR, CPC, cost, conversions, value, CPA) over configurable windows. |
+| `get_ad_performance` | Ad-level performance across campaigns and ad groups. |
+| `get_ad_creatives` | Reads RSA headlines, descriptions, paths, final URLs, and approval/ad strength fields. |
+| `get_image_assets` | Lists image assets with dimensions, URLs, and metadata. |
+| `download_image_asset` | Downloads an image asset locally for visual inspection or review. |
+| `get_asset_usage` | Shows which campaigns/ad groups reference image and creative assets. |
+| `analyze_image_assets` | Analyzes image asset dimensions, aspect ratios, and performance. |
+| `get_budget_utilization` | Compares daily spend against configured campaign budgets to spot budget-capped or underspending campaigns. |
+| `get_bidding_strategies` | Lists portfolio and campaign bidding strategies, targets, and campaign counts. |
+| `get_change_history` | Reads Google Ads `change_event` history (who changed what resource and when) for troubleshooting. |
+| `get_performance_trends` | Account or campaign time series (`total`, `daily`, or `weekly`) in the account's time zone with `conversions` (interaction date) alongside `conversions_by_conversion_date`, `conversion_lag_warning`, and `totals_are_partial`. |
+| `compare_periods` | Compares two explicit (`YYYY-MM-DD:YYYY-MM-DD`) or preset (`week`, `month`, `quarter`) periods in the account's time zone with absolute and percentage deltas. |
+| `generate_client_report` | Generates an executive client report (`json`, `markdown`, or `html`) with typed `ReportBranding`, period-over-period deltas, top campaigns/keywords, wasted search terms, optional recommendations, and truncation metadata. |
+| `generate_agency_dashboard` | Consolidates performance across multiple accounts **strictly separated by currency** (`managed_totals_by_currency`), surfacing alerts, pending approvals, and per-client truncation flags. |
+| `detect_waste` | Flags non-converting search terms, low-CTR keywords, non-converting ad groups, and budget-limited campaigns in the account's time zone with `totals_are_partial`. |
+| `check_alerts` | Evaluates spend, CTR, CPA, and waste thresholds from `config/alerts.json` (`defaults` + per-account overrides). |
+| `generate_optimization_plan` | Produces a prioritized, **non-executing** list of suggested `dry_run=true` MCP actions backed by account evidence. |
+| `list_analysis_profiles` | Lists built-in and user-defined Markdown + TOML analysis profiles (`leads-audit`, `ecommerce-audit`, `agency-weekly`, plus custom profiles). |
+| `get_analysis_profile` | Returns a profile's full Markdown instructions, effective TOML parameters/thresholds, reproducibility header, and security notice. |
+
+---
+
+### 2. `diagnostics` Module (5 tools)
+
+Included in `leads`, `ecommerce`, `agency`, and `full` presets.
+
+| Tool | What It Does |
+| --- | --- |
+| `diagnose_delivery` | 360° root-cause diagnosis for zero/dropped impressions: inspects account status, `billing_setup`, `account_budget`, campaign `primary_status`/`primary_status_reasons`, budget/rank impression share losses, and ad/asset/keyword policy disapprovals — separating findings into `confirmed_causes`, `hypotheses`, and `insufficient_data` (downgrading absence-based billing conclusions when `billing_setup` is truncated). |
+| `get_budget_pacing` | Computes complete-day MTD spend in the account's time zone, 7-day vs. MTD daily run rate, projected end-of-month spend, remaining budget, required daily spend, and status (`on_track`, `underspending`, `overspending`) against an explicit target, TOML profile target, or inferred active daily budgets. |
+| `get_landing_page_performance` | Landing page URL metrics (`landing_page_view`) including mobile-friendly click rate (`mobile_friendly_clicks_percentage`) and `speed_score`. |
+| `get_demographics_performance` | Performance breakdowns by `age`, `gender`, `income`, `parental_status`, or `all`. |
+| `get_assets_and_calls_performance` | Extension/asset metrics and policy approvals (`campaign_asset`) plus aggregate call metrics (`call_view`, zero PII). |
+
+---
+
+### 3. `measurement` Module (8 tools)
+
+Included in `leads`, `ecommerce`, `agency`, and `full` presets.
+
+| Tool | What It Does |
+| --- | --- |
+| `audit_conversion_tracking` | Unified conversion audit crossing `customer.conversion_tracking_setting` (MCC vs. account ownership, Customer Data Terms, EC4L), `conversion_action`, `customer_conversion_goal`, `campaign_conversion_goal`, `custom_conversion_goal`, `conversion_goal_campaign_config` (v25), campaign bidding strategies, and per-action volume. Flags MCC centralization, secondary actions inside custom goals, multiple primaries in the same category, and Smart Bidding alignment (degrading absence-based alerts to `insufficient_data` on truncation/optional-query failure). |
+| `get_offline_conversion_diagnostics` | Inspects `offline_conversion_upload_client_summary` and `offline_conversion_upload_conversion_action_summary` (sent, accepted, pending, failed, error codes — **zero PII**), distinguishes API ingestion from ad attribution, and flags legacy upload integrations eligible for **Data Manager API** upgrade. |
+| `get_conversion_actions` | Lists conversion actions with category, origin, type, attribution model, counting type, default value, and `primary_for_goal`. |
+| `get_conversion_performance` | Conversion volume, value, and cost per conversion segmented by conversion action. |
+| `get_enhanced_conversions_status` | Checks customer-level Enhanced Conversions for Leads and Customer Data Terms acceptance status. |
+| `check_consent_signal_coverage` | Reports primary-vs-all conversion scope ratios (`conversions / all_conversions`) honestly as a measurement-scope metric (explicitly noting that Google Ads API does not expose per-event Consent Mode signals). |
+| `get_customer_match_list_stats` | Reads CRM-based `user_list` membership status, size for Search/Display, match rate range, and eligibility. |
+| `get_offline_user_data_job_status` | Tracks async `offline_user_data_job` status and failure reasons for Customer Match uploads. |
+
+---
+
+### 4. `search` Module (16 tools)
+
+Included in `leads`, `agency`, and `full` presets.
+
+| Tool | What It Does |
+| --- | --- |
+| `get_search_terms_report` | Search queries (`search_term_view`) with status (`ADDED`/`EXCLUDED`/`NONE`), spend, clicks, conversions, and value. |
+| `get_keyword_performance` | Keyword metrics (`keyword_view`) with match type, Quality Score, and all **3 Quality Score subcomponents** (`creative_quality_score`, `post_click_quality_score`, `search_predicted_ctr`). |
+| `get_impression_share_losses` | Campaign Search Impression Share, exact-match IS, and IS lost to budget vs. rank. |
+| `get_ad_strength_diagnostics` | Audits Responsive Search Ad strength (`POOR`/`AVERAGE`/`GOOD`/`EXCELLENT`), policy approvals, and pinning. |
+| `get_auction_insights` | Queries API `auction_insight_*` metrics when permitted by the developer token / Cloud project. |
+| `analyze_auction_insights_csv` | Parses Google Ads UI Auction Insights CSV exports (**English and Spanish**) into competitor rankings and high-pressure overlap alerts whenever the API restricts `auction_insight_*`. |
+| `get_shared_sets` | Lists shared negative keyword lists and campaign attachments. |
+| `analyze_search_terms_clusters` | Groups search terms into n-gram clusters with aggregate spend, clicks, CTR, conversions, and CPA. |
+| `suggest_negatives_from_clusters` | Suggests candidate negative keywords from high-spend, zero-conversion search term clusters (read-only advisory). |
+| `generate_keyword_ideas` | Uses Google Ads Keyword Planner to discover new keyword ideas with search volumes and competition. |
+| `generate_keyword_historical_metrics` | Retrieves historical monthly search volume, competition, and top-of-page bid ranges for seed keywords. |
+| `generate_keyword_forecast` | Forecasts clicks, impressions, cost, and conversions for a keyword plan. |
+| `find_geo_target_constants` | Searches Google Ads `geo_target_constant` IDs by city, region, or country name. |
+| `list_experiments` | Lists Search/Performance experiments and their status. |
+| `get_experiment` | Retrieves configuration and arms (control vs. treatment) of an experiment. |
+| `get_experiment_results` | Compares control vs. treatment arm metrics with lift/delta calculations. |
+
+---
+
+### 5. `pmax` Module (8 tools)
+
+Included in `ecommerce`, `agency`, and `full` presets.
+
+| Tool | What It Does |
+| --- | --- |
+| `get_pmax_diagnostics` | Full Performance Max audit: `asset_group` strength/metrics, `asset_group_asset` v25 `primary_status`/`primary_status_reasons`/approvals, `asset_group_signal` (audiences & search themes), `asset_group_listing_group_filter`, per-campaign `campaign_search_term_insight` (top 10 PMax campaigns), and `performance_max_placement_view` (mobile-app impression alerts). Explicitly reports `coverage_status` (`complete` / `empty` / `sampled` / `partial_error`), `truncated_queries`, `search_term_insights_coverage`, `placements_coverage`, and `sampling_warnings`. |
+| `analyze_auction_insights_csv` | Parses Google Ads UI Auction Insights CSV exports (EN/ES). |
+| `get_geo_performance` | Performance breakdown by geographic location. |
+| `get_device_performance` | Performance breakdown by device (`MOBILE`, `DESKTOP`, `TABLET`, `CONNECTED_TV`). |
+| `get_time_of_day_performance` | Performance breakdown by day of week and hour of day. |
+| `get_audience_performance` | Performance breakdown across audience segments. |
+| `list_recommendations` | Lists active Google Ads recommendations (read-only review). |
+| `get_recommendation_detail` | Inspects impact estimates and parameters of a specific recommendation. |
+
+---
+
+### 6. `shopping` Module (6 tools)
+
+Included in `ecommerce` and `full` presets.
+
+| Tool | What It Does |
+| --- | --- |
+| `get_shopping_performance` | Shopping performance grouped by `product` (SKU), `brand`, `category` (`shopping_performance_view`), or `product_group` (`product_group_view`), returning blended ROAS, `top_winners`, `wasted_products` above `min_waste_spend`, wasted-spend share %, and `totals_are_partial`. |
+| `analyze_auction_insights_csv` | Parses Shopping Auction Insights UI CSV exports (EN/ES). |
+| `get_geo_performance` | Geographic performance breakdown. |
+| `get_device_performance` | Device performance breakdown. |
+| `list_recommendations` | Lists Shopping/account recommendations. |
+| `get_recommendation_detail` | Inspects a recommendation in detail. |
+
+---
+
+### 7. `display` Module (5 tools)
+
+Included in `full` preset (or via `--modules display`).
+
+| Tool | What It Does |
+| --- | --- |
+| `get_placements_and_video_performance` | Audits `detail_placement_view` (surfacing zero-conversion and `MOBILE_APPLICATION` exclusion candidates) alongside campaign video view rate, average CPV, and quartile funnel (`p25/p50/p75/p100`). |
+| `get_audience_performance` | Audience segment performance. |
+| `get_geo_performance` | Geographic performance. |
+| `get_device_performance` | Device performance. |
+| `get_time_of_day_performance` | Day-of-week & hour-of-day performance. |
+
+---
+
+### 8. `demand-gen` Module (5 tools)
+
+Included in `full` preset (or via `--modules demand-gen`).
+
+| Tool | What It Does |
+| --- | --- |
+| `get_demand_gen_performance` | Demand Gen campaign & ad group performance summary. |
+| `get_placements_and_video_performance` | Placement brand-safety audit + video view rate & quartile retention (`p25/p50/p75/p100`). |
+| `get_audience_performance` | Audience segment performance. |
+| `get_geo_performance` | Geographic performance. |
+| `get_device_performance` | Device performance. |
+
+---
+
+### 9. `mcc` Module (11 tools)
+
+Included in `agency` and `full` presets.
+
+| Tool | What It Does |
+| --- | --- |
+| `list_client_accounts` | Discovers active non-manager child accounts under a Manager Account (MCC) and automatically registers dynamic per-account `login-customer-id` routing for the session. |
+| `get_client_context` | Returns the active client context and configured client metadata. |
+| `switch_context` | Switches the active client context for multi-account agency sessions. |
+| `run_across_clients` | Runs a read-only GAQL query in parallel across multiple client accounts (respecting per-account MCC routing and `ALLOWED_CUSTOMER_IDS`). |
+| `generate_agency_dashboard` | Multi-account consolidated dashboard separated by currency. |
+| `get_audit_log` | Reads local append-only governance audit entries with filters (account, tool, status, date). |
+| `get_pending_approvals` | Lists pending human-approval previews awaiting confirmation. |
+| `list_expiring_approvals` | Highlights pending approvals nearing their TTL expiration. |
+| `list_pending_client_approvals` | Lists approvals requiring explicit client sign-off when `REQUIRE_CLIENT_APPROVAL=true`. |
+| `export_audit_log` | Exports filtered audit logs to JSON or CSV for compliance/client reporting. |
+| `rotate_audit_log` | Archives older daily audit JSONL files into compressed zip archives per retention policy. |
+
+---
+
+### 10. `operations` Module (68 guarded write & governance tools — opt-in only)
+
+**Hidden from `tools/list` whenever `READ_ONLY_MODE=true`.** Only exposed when `READ_ONLY_MODE=false` and `operations` (or `--preset full`) is enabled. Every mutation requires `dry_run=true` first (`approval_id` returned) before `dry_run=false`. See [Write Safety Guarantees by Family](docs/compatibility-matrix.md#5-write-safety-guarantees-by-family-operations-module) for exact `validateOnly`, `state_verifier`, and `revert_operation` coverage per family.
+
+- **Campaigns & Budgets (13):** `create_campaign_budget`, `update_campaign_budget` *(optimistic locking + revert)*, `create_search_campaign`, `create_pmax_campaign`, `create_display_campaign`, `create_campaign_from_template`, `update_campaign`, `pause_campaign` *(optimistic locking + revert)*, `enable_campaign` *(optimistic locking + revert)*, `remove_campaign` *(optimistic locking)*, `update_campaign_geo_targets`, `update_campaign_schedule`, `copy_campaign`.
+- **Ad Groups & Ads (11):** `create_ad_group`, `update_ad_group`, `pause_ad_group`, `enable_ad_group`, `remove_ad_group`, `create_responsive_search_ad`, `create_call_ad`, `update_ad`, `pause_ad`, `enable_ad`, `remove_ad`.
+- **Keywords, Bids & Negatives (10):** `add_keywords_to_ad_group`, `update_keyword_bid` *(optimistic locking + revert)*, `pause_keyword` *(revert)*, `enable_keyword` *(revert)*, `remove_keyword`, `add_negative_keyword`, `add_negative_keywords_bulk`, `create_negative_keyword_list`, `attach_negative_keyword_list_to_campaign`, `add_account_negative_keywords` *(applies across Search, Shopping & PMax)*.
+- **Audiences, Bid Modifiers & Customer Match (6):** `add_audience_to_ad_group`, `remove_audience_from_ad_group`, `update_bid_modifier`, `create_customer_match_list`, `add_customer_match_members` *(local SHA-256 hashing, zero raw PII in logs)*, `remove_customer_match_members`.
+- **Assets, Extensions & Placements (8):** `create_sitelink_extension`, `create_callout_extension`, `create_structured_snippet_extension`, `create_call_extension`, `create_image_asset`, `link_asset_to_campaign`, `unlink_asset_from_campaign`, `exclude_placements` *(campaign or account level, websites & mobile apps, deduplicated up to 100)*.
+- **PMax, Demand Gen, Experiments & Recommendations (8):** `create_pmax_asset_group`, `create_demand_gen_campaign`, `create_demand_gen_ad_group`, `create_experiment`, `schedule_experiment`, `end_experiment`, `apply_recommendation`, `dismiss_recommendation`.
+- **Conversion Actions, Goals & Offline Uploads (8):** `create_conversion_action`, `update_conversion_action`, `pause_conversion_action`, `update_campaign_conversion_goal` *(optimistic locking + revert)*, `set_conversion_action_primary` *(optimistic locking + revert)*, `upload_click_conversions`, `upload_call_conversions`, `upload_conversion_adjustments`.
+- **MCC Bulk & Write Governance (4):** `mcc_bulk_apply` *(multi-account guarded batch with per-item execution tracking & `retry_failed_from_approval_id` partial retry)*, `approve_operation`, `reject_operation`, `revert_operation`.
+
+---
+
+## MCP Prompts & Resources
+
+Clients that support MCP Prompts and Resources automatically receive:
+
+| Type | Identifier | Purpose |
+| --- | --- | --- |
+| **Prompt** | `analysis_profile_prompt` | Loads any Markdown + TOML analysis profile (`leads-audit`, `ecommerce-audit`, `agency-weekly`, or custom user profile) with reproducibility header and parameters. |
+| **Prompt** | `google_ads_workflow` | Guided step-by-step Google Ads analysis workflow. |
+| **Prompt** | `gaql_help` | GAQL query construction assistance and best practices. |
+| **Prompt** | `monthly_client_review` | Structured monthly performance & optimization review prompt. |
+| **Prompt** | `safe_campaign_change` | Guided `dry_run -> review diff -> approval_id -> execute` change workflow. |
+| **Resource** | `agency://governance/status` | Live read-only snapshot of active guardrails, limits, and operator settings. |
+| **Resource** | `gaql://reference` | Compact GAQL field & resource reference. |
+| **Template** | `agency://docs/{domain}` | Embedded domain guides (campaigns, guardrails, reporting, offline conversions, Keyword Planner, etc.). |
+| **Template** | `agency://tools/{tool_name}` | Tool-level usage documentation and safety notes. |
+
+> **Multi-AI self-containment:** Critical workflows (analysis profiles, `dry_run` rules, currency/timezone metadata, truncation flags) are also exposed directly through tools so clients that ignore MCP Prompts/Resources work with zero loss of functionality.
+
+---
+
+## Customizable Analysis Profiles (Markdown + TOML)
+
+Built-in profiles are packaged inside the wheel (`agency/builtin_profiles/` + `config/profiles/`) so they work even when installed via `pip`/`uvx` outside a git checkout:
+- **`leads-audit`** (`.toml` + `.md`): Lead-gen Search audit covering conversion goals, primary vs. secondary separation, delivery, pacing, wasted search terms, and Quality Score.
+- **`ecommerce-audit`** (`.toml` + `.md`): Ecommerce audit covering PMax asset groups/placements, Shopping SKU/brand ROAS & waste, conversion tracking, and budget pacing.
+- **`agency-weekly`** (`.toml` + `.md`): Multi-account weekly executive review separated by currency with alerts and prioritized next actions.
+
+**User customization:** Place `<profile-id>.toml` and/or `<profile-id>.md` in `GOOGLE_ADS_CONFIG_DIR/profiles/` to create custom profiles or override any built-in profile. TOML thresholds automatically merge over `alerts.json` defaults.
+
+**Security boundary:** Profiles control analysis methodology, target KPIs, and report structure only. They **cannot** override `READ_ONLY_MODE`, `ALLOWED_CUSTOMER_IDS`, economic caps, or human approval requirements.
+
+---
+
+## CLI Commands & Scheduled Alerts
+
+The lightweight CLI dispatcher (`google_ads_cli.py`) powers all subcommands without pre-importing the server or `.env` before managed profile initialization:
 
 ```bash
-docker run --rm -p 8000:8000 --env-file .env \
-  -v /ruta/segura:/run/secrets:ro \
-  google-ads-mcp
+# 1. Start MCP server directly (stdio or streamable-http)
+google-ads-mcp-server --transport stdio --demo --preset ecommerce
+google-ads-mcp-server --transport streamable-http --host 127.0.0.1 --port 8000
+
+# 2. Browser OAuth onboarding + client registration
+google-ads-mcp-server connect --client claude-desktop --customer 1234567890 --preset leads
+
+# 3. Register an existing profile or --demo in another desktop client
+google-ads-mcp-server register --client codex --preset agency
+google-ads-mcp-server register --client generic --demo
+
+# 4. Preflight diagnostics (live or offline, human or JSON)
+google-ads-mcp-server doctor
+google-ads-mcp-server doctor --offline --json
+
+# 5. Serve a managed profile directly (read-only enforced, uses saved or CLI preset)
+google-ads-mcp-server --profile /path/to/profile.json serve --preset ecommerce
+
+# 6. Scheduled alerts CLI (for cron, GitHub Actions, Slack/email scripts)
+google-ads-mcp-server alerts --profile leads-audit --format markdown --fail-on-alerts
+google-ads-mcp-server alerts --demo --profile leads-audit --format json
 ```
 
-Las rutas configuradas en `.env` deben apuntar al volumen del contenedor, por ejemplo `/run/secrets/google-ads-service-account.json`.
+`alerts --fail-on-alerts` exits with code `2` whenever one or more threshold alerts fire.
 
-Para conectar ChatGPT web:
+---
 
-1. Publica `/mcp` detrás de HTTPS.
-2. Protege el endpoint con autenticación.
-3. Habilita Developer Mode en ChatGPT.
-4. Crea una app MCP con `https://tu-dominio/mcp`.
-5. Escanea las herramientas y prueba `server_status`.
+## Data Accuracy, Truncation & Safety Architecture
 
-No publiques este servidor sin autenticación. Es single-tenant y todas las solicitudes usan las credenciales configuradas en el proceso. Un SaaS multiusuario necesita OAuth por usuario, autorización propia y almacenamiento aislado de tokens.
+- **Account time zone & closed days:** Reporting and diagnostic tools resolve date windows in each account's `customer.time_zone` (with `tzdata` on Windows) and exclude the current incomplete day by default (`complete_days_only=True`). Every response includes `currency_code`, `time_zone`, `queried_at_utc`, and `conversion_lag_warning` when the window ends within the last 3 days.
+- **No silent truncation or false-positive absence alerts:** Bounded searches cap pagination at `GOOGLE_ADS_MAX_SEARCH_ROWS` (default `2000`) and propagate `truncated`, `totals_are_partial`, `truncated_queries`, `truncation_warning`, and `coverage_complete: false`. Absence-based alerts (`SMART_BIDDING_WITHOUT_EFFECTIVE_ACTIONS`, `PRIMARY_ACTION_NO_VOLUME`, `NO_RECENT_OFFLINE_UPLOADS`, `NO_APPROVED_BILLING_SETUP`) automatically downgrade to `insufficient_data` whenever their backing query is truncated (or an optional goal/summary query fails).
+- **Strict multi-currency & multi-MCC isolation:** Agency dashboards never sum metrics across different currencies (`managed_totals_by_currency`), and dynamic `login-customer-id` routing lets one session switch cleanly between direct accounts and multiple MCCs (`RuntimeContext` + `GOOGLE_ADS_LOGIN_CUSTOMER_MAP` + `list_client_accounts`).
+- **Loopback-only HTTP by default:** `streamable-http` defaults to `127.0.0.1` (including inside `Dockerfile`) and refuses to bind to non-loopback hosts (`0.0.0.0`, etc.) unless `MCP_HTTP_ALLOW_REMOTE=true` is explicitly set behind an authenticated HTTPS proxy.
+- **PII & hygiene protection:** Audit logs redact sensitive payloads; offline conversion diagnostics and Customer Match never log raw PII; automated hygiene tests block tracked credentials or client data.
 
-## Validación y desarrollo
+---
 
-Pruebas automatizadas:
+## Client Compatibility & Self-Hosted HTTP
+
+- **Desktop `stdio` (primary v1.0 path):** Config generation and `stdio` MCP handshakes are automated for Claude Desktop, Claude Code, Codex, Antigravity, Gemini CLI, and generic desktop hosts (Cursor, VS Code, Cherry Studio, Cline, Kimi CLI). Desktop `.mcpb` bundling is **planned** (not yet built). See [Compatibility Matrix](docs/compatibility-matrix.md) for verified status per client, channel coverage, API boundaries, and per-family write guarantees.
+- **Self-hosted `Streamable HTTP` (advanced):** Single-tenant per process (`--transport streamable-http` or Docker). Always place an authenticated HTTPS reverse proxy (with `Origin` validation) in front before setting `MCP_HTTP_ALLOW_REMOTE=true`. Multi-tenant remote OAuth 2.1 (for ChatGPT web / Claude.ai web) is planned post-v1.0.
+
+---
+
+## Development & Documentation
+
+- [Compatibility Matrix (AI Apps, Channels, API Limits, Write Guarantees)](docs/compatibility-matrix.md)
+- [Guía rápida y playbooks por rol (Español)](docs/es/README.md) | [Guía de conexión (Español)](docs/connect.md)
+- [Operational Design](DESIGN.md) | [Guardrails](docs/guardrails.md) | [Release Checklist](docs/release-checklist.md)
+- [Roadmap v3 (Desktop Beta & Acceptance)](docs/roadmap-marketing-v3.md) | [Roadmap v2 & Technical Log](docs/roadmap-marketing-v2.md)
+
+Run the full automated test suite:
 
 ```bash
-python -m pytest
+pip install -e ".[dev]"
+python -m pytest -q
 ```
 
-Las pruebas cubren:
+## License
 
-- validación de IDs, límites y fechas;
-- diagnóstico sin exposición de secretos;
-- persistencia segura del cliente y token OAuth;
-- descubrimiento de herramientas por `stdio`;
-- descubrimiento y llamadas por Streamable HTTP;
-- acceso a metadatos mediante `GoogleAdsFieldService`.
-
-Prueba real con Google Ads:
-
-```bash
-python scripts/authorize_oauth.py
-python scripts/smoke_google_ads.py
-```
-
-`authorize_oauth.py` solo es necesario para OAuth. `smoke_google_ads.py` realiza lecturas reales y requiere credenciales válidas.
-
-## Problemas frecuentes
-
-### `server_status` devuelve `ready: false`
-
-Lee el campo `issues`. Normalmente falta el Developer Token, la ruta de credenciales no existe o todavía no se generó el token OAuth.
-
-### `DEVELOPER_TOKEN_PROHIBITED`
-
-El proyecto de Google Cloud y el Developer Token pertenecen a combinaciones incompatibles. Crea un proyecto dedicado o usa el token originalmente asociado al proyecto.
-
-### `USER_PERMISSION_DENIED`
-
-El usuario OAuth o la cuenta de servicio no tiene acceso a la cuenta solicitada. Si accedes mediante un MCC, configura también `GOOGLE_ADS_LOGIN_CUSTOMER_ID`.
-
-### No aparecen todas las cuentas
-
-`list_accounts` devuelve las cuentas accesibles directamente por la identidad autenticada. Verifica los vínculos del MCC y los permisos del usuario o cuenta de servicio.
-
-### OAuth abre el navegador en cada inicio
-
-Comprueba que `GOOGLE_ADS_TOKEN_PATH` sea escribible, persista entre ejecuciones y no apunte al mismo archivo que `GOOGLE_ADS_CREDENTIALS_PATH`.
-
-## Seguridad y operación
-
-- `.env`, tokens, claves y credenciales están ignorados por Git.
-- Los secretos deben vivir en un gestor de secretos o volumen de solo lectura en producción.
-- `server_status` no devuelve valores ni rutas sensibles.
-- Las llamadas HTTP tienen timeout configurable.
-- Los IDs y límites interpolados en GAQL se validan.
-- Las herramientas MCP están marcadas como lectura o escritura local.
-- Rota inmediatamente cualquier Developer Token, cliente OAuth o clave JSON expuesta.
-
-## Licencia
-
-MIT. Consulta [LICENSE](LICENSE). El aviso anterior se conserva porque la licencia MIT exige mantenerlo en copias o porciones sustanciales; Fidel es titular de las modificaciones realizadas desde 2026.
+MIT. See [LICENSE](LICENSE).

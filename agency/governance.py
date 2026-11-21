@@ -13,7 +13,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Callable
 
-from .config import DATA_DIR, client_display_name, get_settings
+from .config import DATA_DIR, client_display_name, ensure_customer_allowed, get_settings
 
 
 _lock = RLock()
@@ -124,6 +124,8 @@ def audited_tool(function: Callable[..., Any]) -> Callable[..., Any]:
             bound = signature.bind_partial(*args, **kwargs)
             customer_id = bound.arguments.get("customer_id")
             try:
+                if customer_id is not None and os.getenv("GOOGLE_ADS_MANAGED_PROFILE"):
+                    ensure_customer_allowed(customer_id)
                 result = await function(*args, **kwargs)
                 record_audit(function.__name__, customer_id, dict(bound.arguments), "success", result)
                 return result
@@ -138,6 +140,8 @@ def audited_tool(function: Callable[..., Any]) -> Callable[..., Any]:
         bound = signature.bind_partial(*args, **kwargs)
         customer_id = bound.arguments.get("customer_id")
         try:
+            if customer_id is not None and os.getenv("GOOGLE_ADS_MANAGED_PROFILE"):
+                ensure_customer_allowed(customer_id)
             result = function(*args, **kwargs)
             record_audit(function.__name__, customer_id, dict(bound.arguments), "success", result)
             return result

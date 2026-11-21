@@ -1,0 +1,20 @@
+id = "leads-audit"
+name = "Lead Generation Audit"
+description = "Audit Search lead-generation accounts: conversion goals, primary vs secondary conversions, wasted spend, and CPA thresholds."
+version = "1.0"
+recommended_modules = ["core", "measurement", "search"]
+
+[parameters]
+days = 30
+complete_days_only = true
+target_cpa = 25.0
+min_waste_spend = 10.0
+campaign_name_contains = ""
+exclude_campaign_names = []
+
+[thresholds]
+max_daily_spend_micros = 100000000
+min_ctr = 0.02
+max_ctr_drop_pct = 30
+max_cpa_micros = 25000000
+max_waste_micros = 10000000

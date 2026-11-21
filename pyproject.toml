@@ -1,7 +1,7 @@
 [project]
-name = "google-ads-mcp"
+name = "google-ads-mcp-server"
 version = "0.2.0"
-description = "Extensible Google Ads integration for the Model Context Protocol (MCP)"
+description = "Open-source Google Ads MCP server with audits, multi-currency reporting, and safety guardrails"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -25,26 +25,38 @@ dependencies = [
     "pydantic>=2.0",
     "python-dotenv>=1.0.0",
     "requests>=2.31.0",
+    "tzdata>=2024.1; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
+remote = [
+    "PyJWT[crypto]>=2.10,<3",
+    "httpx>=0.27,<1",
+    "starlette>=0.27,<1",
+    "uvicorn>=0.31,<1",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
 ]
 
 [project.scripts]
-google-ads-mcp = "google_ads_server:main"
+google-ads-mcp-server = "google_ads_cli:main"
+google-ads-mcp = "google_ads_cli:main"
+google-ads-mcp-connect = "google_ads_connect:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["google_ads_server"]
+py-modules = ["google_ads_cli", "google_ads_server", "google_ads_connect"]
 
 [tool.setuptools.packages.find]
 include = ["agency*"]
+
+[tool.setuptools.package-data]
+agency = ["builtin_profiles/*.toml", "builtin_profiles/*.md"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

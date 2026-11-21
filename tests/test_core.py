@@ -60,7 +60,8 @@ def test_server_status_reports_missing_configuration(monkeypatch):
     monkeypatch.setattr(server, "GOOGLE_ADS_DEVELOPER_TOKEN", "")
     result = server.server_status()
     assert result["ready"] is False
-    assert len(result["issues"]) >= 2
+    assert any("GOOGLE_ADS_CREDENTIALS_PATH" in issue for issue in result["issues"])
+    assert all("GOOGLE_ADS_DEVELOPER_TOKEN" not in issue for issue in result["issues"])
 
 
 @pytest.mark.asyncio

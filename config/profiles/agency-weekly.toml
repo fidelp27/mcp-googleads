@@ -1,0 +1,19 @@
+id = "agency-weekly"
+name = "Agency Weekly Multi-Account Review"
+description = "Weekly agency review across MCC and direct accounts: multi-currency dashboard, budget pacing, delivery health, and top optimization opportunities."
+version = "1.0"
+recommended_modules = ["core", "diagnostics", "measurement", "search", "pmax", "mcc"]
+
+[parameters]
+days = 7
+complete_days_only = true
+min_waste_spend = 20.0
+campaign_name_contains = ""
+exclude_campaign_names = []
+
+[thresholds]
+max_daily_spend_micros = 150000000
+min_ctr = 0.015
+max_ctr_drop_pct = 25
+max_cpa_micros = 30000000
+max_waste_micros = 15000000

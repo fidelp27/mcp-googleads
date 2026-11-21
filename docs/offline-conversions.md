@@ -30,7 +30,7 @@ Los payloads con `conversions` / `adjustments` **no se persisten en el audit log
 
 ```json
 {
-  "conversion_action_id": "7693341777",
+  "conversion_action_id": "1000000001",
   "conversion_date_time": "2026-08-16 12:00:00-03:00",
   "conversion_value": 99.99,
   "currency_code": "USD",
@@ -47,7 +47,7 @@ Alternativa (Enhanced Conversions for Leads sin gclid):
 
 ```json
 {
-  "conversion_action_id": "7693341777",
+  "conversion_action_id": "1000000001",
   "conversion_date_time": "2026-08-16 12:00:00-03:00",
   "user_identifiers": [
     {"email": "user@example.com"},
@@ -61,7 +61,7 @@ Alternativa (Enhanced Conversions for Leads sin gclid):
 
 ```json
 {
-  "conversion_action_id": "7693341777",
+  "conversion_action_id": "1000000001",
   "caller_id": "+15555550100",
   "call_start_date_time": "2026-08-16 11:00:00",
   "conversion_date_time": "2026-08-16 12:00:00",
@@ -76,7 +76,7 @@ Alternativa (Enhanced Conversions for Leads sin gclid):
 Retraction:
 ```json
 {
-  "conversion_action_id": "7693341777",
+  "conversion_action_id": "1000000001",
   "adjustment_date_time": "2026-08-16 15:00:00",
   "adjustment_type": "RETRACTION",
   "order_id": "ORDER-42"
@@ -86,7 +86,7 @@ Retraction:
 Restatement (cambio de valor):
 ```json
 {
-  "conversion_action_id": "7693341777",
+  "conversion_action_id": "1000000001",
   "adjustment_date_time": "2026-08-16 15:00:00",
   "adjustment_type": "RESTATEMENT",
   "order_id": "ORDER-42",
@@ -97,7 +97,7 @@ Restatement (cambio de valor):
 Enhancement (upgrade a Enhanced Conversions con user data):
 ```json
 {
-  "conversion_action_id": "7693341777",
+  "conversion_action_id": "1000000001",
   "adjustment_date_time": "2026-08-16 15:00:00",
   "adjustment_type": "ENHANCEMENT",
   "order_id": "ORDER-42",

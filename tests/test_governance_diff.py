@@ -139,7 +139,7 @@ def test_build_diff_from_ops_single_update():
     operations = [
         {
             "update": {
-                "resourceName": "customers/5461642152/campaignBudgets/999",
+                "resourceName": "customers/1234567890/campaignBudgets/999",
                 "amountMicros": "8000000",
             },
             "updateMask": "amount_micros",
@@ -148,7 +148,7 @@ def test_build_diff_from_ops_single_update():
     diffs = build_diff_from_operations(previous, operations)
     assert len(diffs) == 1
     entry = diffs[0]
-    assert entry["resource"] == "customers/5461642152/campaignBudgets/999"
+    assert entry["resource"] == "customers/1234567890/campaignBudgets/999"
     assert entry["update_mask"] == ["amount_micros"]
     assert entry["changes"][0]["changed"] is True
     assert entry["changes"][0]["old"] == "5000000"

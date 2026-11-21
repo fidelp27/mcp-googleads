@@ -22,19 +22,19 @@ def isolated_lock_root(tmp_path, monkeypatch):
 
 
 def test_acquire_and_release(isolated_lock_root):
-    with locks.resource_lock("5461642152", "customers/1/campaigns/1") as info:
+    with locks.resource_lock("1234567890", "customers/1/campaigns/1") as info:
         assert Path(info["lock_path"]).exists()
         assert info["lock_wait_ms"] >= 0
     # File remains but no longer held; the FileLock leaves the sentinel
 
 
 def test_lock_path_created_under_customer_dir(isolated_lock_root):
-    with locks.resource_lock("5461642152", "customers/1/campaigns/1") as info:
-        assert "5461642152" in info["lock_path"]
+    with locks.resource_lock("1234567890", "customers/1/campaigns/1") as info:
+        assert "1234567890" in info["lock_path"]
 
 
 def test_lock_wait_ms_is_small_when_uncontested(isolated_lock_root):
-    with locks.resource_lock("5461642152", "customers/1/campaigns/1") as info:
+    with locks.resource_lock("1234567890", "customers/1/campaigns/1") as info:
         assert info["lock_wait_ms"] < 500
 
 
@@ -48,7 +48,7 @@ def test_two_threads_serialize_on_same_resource(isolated_lock_root):
     def worker(name: str, hold_seconds: float):
         barrier.wait()
         with locks.resource_lock(
-            "5461642152",
+            "1234567890",
             "customers/1/campaigns/1",
             timeout_seconds=5,
         ):
@@ -75,7 +75,7 @@ def test_second_call_times_out_when_first_holds(isolated_lock_root):
 
     def hold_lock():
         with locks.resource_lock(
-            "5461642152",
+            "1234567890",
             "customers/1/campaigns/1",
             timeout_seconds=5,
         ):
@@ -89,7 +89,7 @@ def test_second_call_times_out_when_first_holds(isolated_lock_root):
 
     with pytest.raises(locks.ResourceLockedError) as exc_info:
         with locks.resource_lock(
-            "5461642152",
+            "1234567890",
             "customers/1/campaigns/1",
             timeout_seconds=0.1,
         ):
@@ -124,7 +124,7 @@ def test_different_resources_same_customer_do_not_block(isolated_lock_root):
     hits: list[str] = []
 
     def worker(resource: str):
-        with locks.resource_lock("5461642152", resource, timeout_seconds=1):
+        with locks.resource_lock("1234567890", resource, timeout_seconds=1):
             hits.append(resource)
             time.sleep(0.1)
 
@@ -150,14 +150,14 @@ def test_missing_customer_id_rejected(isolated_lock_root):
 
 def test_missing_resource_key_rejected(isolated_lock_root):
     with pytest.raises(ValueError, match="resource_key is required"):
-        with locks.resource_lock("5461642152", ""):
+        with locks.resource_lock("1234567890", ""):
             pass
 
 
 def test_negative_timeout_rejected(isolated_lock_root):
     with pytest.raises(ValueError, match="non-negative"):
         with locks.resource_lock(
-            "5461642152", "customers/1/campaigns/1", timeout_seconds=-1
+            "1234567890", "customers/1/campaigns/1", timeout_seconds=-1
         ):
             pass
 
@@ -165,7 +165,7 @@ def test_negative_timeout_rejected(isolated_lock_root):
 def test_error_message_contains_key_fields(isolated_lock_root):
     def hold_lock():
         with locks.resource_lock(
-            "5461642152", "customers/1/campaigns/1", timeout_seconds=5
+            "1234567890", "customers/1/campaigns/1", timeout_seconds=5
         ):
             time.sleep(0.3)
 
@@ -175,14 +175,14 @@ def test_error_message_contains_key_fields(isolated_lock_root):
     try:
         with pytest.raises(locks.ResourceLockedError) as exc_info:
             with locks.resource_lock(
-                "5461642152",
+                "1234567890",
                 "customers/1/campaigns/1",
                 timeout_seconds=0.05,
             ):
                 pass
         message = str(exc_info.value)
         assert "RESOURCE_LOCKED" in message
-        assert "5461642152" in message
+        assert "1234567890" in message
         assert "customers/1/campaigns/1" in message
     finally:
         holder.join()
@@ -194,9 +194,9 @@ def test_error_message_contains_key_fields(isolated_lock_root):
 def test_lock_paths_for_lists_active_locks(isolated_lock_root):
     """filelock removes the sentinel on release; lock_paths_for is for debugging
     the currently-held locks, not historical ones."""
-    with locks.resource_lock("5461642152", "customers/1/campaigns/1"):
-        with locks.resource_lock("5461642152", "customers/1/campaigns/2"):
-            paths = locks.lock_paths_for("5461642152")
+    with locks.resource_lock("1234567890", "customers/1/campaigns/1"):
+        with locks.resource_lock("1234567890", "customers/1/campaigns/2"):
+            paths = locks.lock_paths_for("1234567890")
             assert len(paths) == 2
 
 

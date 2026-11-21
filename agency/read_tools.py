@@ -8,7 +8,7 @@ from typing import Optional
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from .api import format_json, search
+from .api import format_json, search, search_with_meta
 from .config import ensure_customer_allowed, ensure_tool_allowed
 from .errors import GoogleAdsError
 from .governance import audited_tool
@@ -42,14 +42,22 @@ def _id(value: str | int | None, field: str) -> str | None:
 def _run(tool_name: str, customer_id: str, query: str) -> str:
     ensure_tool_allowed(tool_name)
     customer_id = ensure_customer_allowed(customer_id)
-    return format_json(
-        {
-            "customer_id": customer_id,
-            "tool": tool_name,
-            "fresh": True,
-            "results": search(customer_id, query),
-        }
-    )
+    meta = search_with_meta(customer_id, query)
+    payload = {
+        "customer_id": customer_id,
+        "tool": tool_name,
+        "fresh": True,
+        "returned_rows": meta["returned_rows"],
+        "truncated": meta["truncated"],
+        "results": meta["rows"],
+    }
+    if meta["truncated"]:
+        payload["max_rows"] = meta["max_rows"]
+        payload["truncation_note"] = (
+            f"Results capped at {meta['max_rows']} rows to protect LLM context. "
+            "Add narrower filters or a shorter date window for complete rows."
+        )
+    return format_json(payload)
 
 
 def _summarize_enhanced_conversions(
@@ -989,13 +997,13 @@ def _summarize_consent_coverage(
     current_period: tuple[str, str],
     previous_period: tuple[str, str],
 ) -> dict:
-    """Attribution-rate audit as a Consent Mode / EC health proxy.
+    """Compare primary (`conversions`) vs total (`all_conversions`) per campaign plus tracking settings.
 
-    Kept pure so the alert paths are exercised without hitting Google Ads.
-    Attribution rate = attributed conversions / total conversions per campaign.
-    A drop of >=20 percentage points versus the previous window, or a
-    campaign with all_conversions>0 and 0 attributed, strongly points at
-    tag / consent breakage.
+    Kept pure so all alert paths are exercised without hitting Google Ads.
+    The Google Ads API does NOT expose per-event Consent Mode signals. The ratio
+    `conversions / all_conversions` reflects measurement scope (primary biddable
+    actions vs. all recorded actions, including secondary micro-conversions) and
+    must NOT be interpreted as proof of Consent Mode failure.
     """
     def _bucket(rows: list[dict]) -> dict[str, dict]:
         buckets: dict[str, dict] = {}
@@ -1079,40 +1087,44 @@ def _summarize_consent_coverage(
         }
         campaigns.append(entry)
 
-        # Per-campaign alerts
+        # Per-campaign alerts (measurement-scope diagnostics, not consent proof)
         if cur["total_conversions"] > 0 and cur["attributed_conversions"] == 0:
             alerts.append(
                 {
-                    "severity": "critical",
-                    "code": "ZERO_ATTRIBUTED_WITH_TOTAL",
+                    "severity": "warning",
+                    "code": "ZERO_PRIMARY_WITH_ALL_CONVERSIONS",
                     "campaign_id": cid_,
                     "message": (
-                        f"'{cur['name']}' recorded {int(cur['total_conversions'])} conversions "
-                        "but 0 attributed. Verify gclid capture, Consent Mode signals and tag firing."
+                        f"'{cur['name']}' recorded {int(cur['total_conversions'])} all_conversions "
+                        "but 0 primary conversions. Check whether only secondary actions are firing "
+                        "or whether campaign conversion goals or tag attribution changed."
                     ),
                 }
             )
         elif cur_rate is not None and cur_rate < 0.3 and cur["total_conversions"] >= 5:
             alerts.append(
                 {
-                    "severity": "high",
-                    "code": "LOW_ATTRIBUTION_RATE",
+                    "severity": "info",
+                    "code": "LOW_PRIMARY_CONVERSION_SHARE",
                     "campaign_id": cid_,
                     "message": (
-                        f"'{cur['name']}' attribution rate is {round(cur_rate * 100, 1)}% "
-                        "(<30%). Consent Mode or tag setup likely leaking signal."
+                        f"'{cur['name']}' primary conversions represent {round(cur_rate * 100, 1)}% "
+                        "of all_conversions (<30%). This is a measurement difference that commonly "
+                        "reflects secondary conversion actions, not proof of Consent Mode leakage; "
+                        "review primary vs. secondary actions before assuming a tag issue."
                     ),
                 }
             )
         if rate_delta_pp is not None and rate_delta_pp <= -20:
             alerts.append(
                 {
-                    "severity": "high",
-                    "code": "ATTRIBUTION_DROP",
+                    "severity": "warning",
+                    "code": "PRIMARY_SHARE_DROP",
                     "campaign_id": cid_,
                     "message": (
-                        f"'{cur['name']}' attribution rate fell {abs(rate_delta_pp):.1f}pp "
-                        "vs the previous window. Investigate tag or consent changes shipped recently."
+                        f"'{cur['name']}' conversions / all_conversions ratio fell {abs(rate_delta_pp):.1f}pp "
+                        "vs the previous window. Review recent changes in primary/secondary conversion "
+                        "actions, campaign goals, tags, or Consent Mode."
                     ),
                 }
             )
@@ -1162,7 +1174,8 @@ def _summarize_consent_coverage(
                 "severity": "info",
                 "code": "NO_DATA_TO_ASSESS",
                 "message": (
-                    "No conversions recorded in either window; can't assess consent signal health yet."
+                    "No conversions recorded in either window; cannot compare primary conversions "
+                    "against all_conversions yet."
                 ),
             }
         )
@@ -1180,10 +1193,13 @@ def _summarize_consent_coverage(
             "total_conversions_current": total_current,
             "total_conversions_previous": total_previous,
             "account_attribution_rate": account_rate,
+            "account_primary_to_all_ratio": account_rate,
         },
         "notes": [
-            "The API does not expose per-event ad_user_data / ad_personalization signals. "
-            "This tool infers consent health from attribution-rate movement, which is the strongest observable proxy.",
+            "The Google Ads API does not expose per-event ad_user_data / ad_personalization signals.",
+            "The ratio conversions / all_conversions compares primary (biddable) conversions "
+            "against all recorded conversions (including secondary actions). Treat it as a "
+            "measurement difference, not as proof of Consent Mode status or tag leakage.",
         ],
     }
 
@@ -1237,6 +1253,9 @@ def register_read_tools(mcp) -> None:
                    ad_group_criterion.keyword.text,
                    ad_group_criterion.keyword.match_type,
                    ad_group_criterion.quality_info.quality_score,
+                   ad_group_criterion.quality_info.creative_quality_score,
+                   ad_group_criterion.quality_info.post_click_quality_score,
+                   ad_group_criterion.quality_info.search_predicted_ctr,
                    ad_group_criterion.effective_cpc_bid_micros,
                    metrics.impressions, metrics.clicks, metrics.ctr,
                    metrics.average_cpc, metrics.cost_micros, metrics.conversions,
@@ -1468,14 +1487,13 @@ def register_read_tools(mcp) -> None:
         customer_id: str = Field(description="Google Ads customer ID"),
         days: int = Field(default=30, description="Lookback window 1-365"),
     ) -> str:
-        """Proxy audit for Consent Mode / Enhanced Conversions health via attribution rate per campaign.
+        """Audit customer tracking terms and compare `conversions` vs `all_conversions` per campaign.
 
         Consent signals (`ad_user_data`, `ad_personalization`) fire client-side in the tag; the
-        Google Ads API does NOT expose them per event. This tool measures the downstream signal
-        that IS observable: the ratio of attributed conversions to all conversions, comparing the
-        current window against the previous same-length window, plus the customer tracking setup.
-        A sharp attribution-rate drop usually points at tag or consent issues before Smart Bidding
-        degrades.
+        Google Ads API does NOT expose them per event. This tool checks customer-level tracking
+        settings and compares `conversions / all_conversions` against the previous same-length
+        window as a measurement-scope diagnostic (primary vs. all conversions, including secondary
+        actions) — NOT as proof of Consent Mode status.
         """
         ensure_tool_allowed("check_consent_signal_coverage")
         cid = ensure_customer_allowed(customer_id)

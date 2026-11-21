@@ -30,15 +30,15 @@ def test_positive_int_rejects_bad(bad):
 
 def test_experiment_resource():
     assert (
-        et._experiment_resource("5461642152", "42")
-        == "customers/5461642152/experiments/42"
+        et._experiment_resource("1234567890", "42")
+        == "customers/1234567890/experiments/42"
     )
 
 
 def test_campaign_resource():
     assert (
-        et._campaign_resource("5461642152", "24140931767")
-        == "customers/5461642152/campaigns/24140931767"
+        et._campaign_resource("1234567890", "11111111111")
+        == "customers/1234567890/campaigns/11111111111"
     )
 
 
@@ -167,7 +167,7 @@ def test_compare_arms_multi_treatment():
 
 
 def test_metrics_for_campaigns_empty_list_returns_zeros(monkeypatch):
-    result = et._metrics_for_campaigns("5461642152", [], 30)
+    result = et._metrics_for_campaigns("1234567890", [], 30)
     assert result == {
         "impressions": 0,
         "clicks": 0,
@@ -180,7 +180,7 @@ def test_metrics_for_campaigns_empty_list_returns_zeros(monkeypatch):
 def test_metrics_for_campaigns_rejects_bad_days(monkeypatch):
     monkeypatch.setattr(et, "search", lambda cid, q: [])
     with pytest.raises(ValueError, match="between 1 and 365"):
-        et._metrics_for_campaigns("5461642152", ["customers/1/campaigns/1"], 400)
+        et._metrics_for_campaigns("1234567890", ["customers/1/campaigns/1"], 400)
 
 
 def test_metrics_for_campaigns_aggregates_rows(monkeypatch):
@@ -201,7 +201,7 @@ def test_metrics_for_campaigns_aggregates_rows(monkeypatch):
         ]
 
     monkeypatch.setattr(et, "search", fake_search)
-    result = et._metrics_for_campaigns("5461642152", ["customers/1/campaigns/1"], 30)
+    result = et._metrics_for_campaigns("1234567890", ["customers/1/campaigns/1"], 30)
     assert result["impressions"] == 1000
     assert result["clicks"] == 50
     assert result["cost_micros"] == 100_000_000

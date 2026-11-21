@@ -3,8 +3,15 @@
 __pycache__
 *.pyc
 .env
-*.json
+*.env
+client_secret*.json
+*token*.json
+credentials.json
+service_account*.json
 ad_images
 generated
+data
+output
+tmp
 tests
-docs
+analisis-*.md

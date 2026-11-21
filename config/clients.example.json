@@ -1,0 +1,11 @@
+{
+  "1234567890": {
+    "name": "Acme Demo",
+    "industry": "B2B SaaS",
+    "agency_contact": "marketing@example.com",
+    "website": "https://example.com",
+    "branding": {
+      "primary_color": "#1a73e8"
+    }
+  }
+}

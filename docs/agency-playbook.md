@@ -59,7 +59,7 @@
 mcc_bulk_apply(
   operation_name="pause_campaign",
   targets={
-    "5461642152": {"campaign_id": "24140931767"},
+    "1234567890": {"campaign_id": "11111111111"},
     "1234567890": {"campaign_id": "999"}
   },
   dry_run=true

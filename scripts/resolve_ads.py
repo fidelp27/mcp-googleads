@@ -6,12 +6,12 @@ the ad_group and ad_group_ad resources.
 
 Usage:
     # IDs on the command line
-    python scripts/resolve_ads.py --adgroups 199327068917 --ads 821049505825
+    python scripts/resolve_ads.py --adgroups 333333333333 --ads 444444444444
 
     # From a report export, resolving both columns, writing two CSVs
     python scripts/resolve_ads.py --file report.csv \
         --adgroup-column utm_content --ad-column utm_creative \
-        --out-prefix output/clariola
+        --out-prefix output/demo
 
 Requires the same .env credentials as the MCP server.
 """

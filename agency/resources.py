@@ -59,13 +59,21 @@ create_structured_snippet_extension create_call_extension create_image_asset
 link_asset_to_campaign unlink_asset_from_campaign list_recommendations
 get_recommendation_detail apply_recommendation dismiss_recommendation
 create_conversion_action update_conversion_action pause_conversion_action
-generate_client_report generate_agency_dashboard compare_periods detect_waste
+generate_client_report generate_agency_dashboard compare_periods get_performance_trends detect_waste
 generate_optimization_plan list_client_accounts get_client_context
 switch_context run_across_clients get_audit_log get_pending_approvals
 revert_operation create_campaign_from_template check_alerts
 list_pending_client_approvals approve_operation reject_operation
 generate_keyword_ideas generate_keyword_historical_metrics
 generate_keyword_forecast find_geo_target_constants
+list_analysis_profiles get_analysis_profile
+audit_conversion_tracking get_offline_conversion_diagnostics
+diagnose_delivery get_budget_pacing get_landing_page_performance
+get_demographics_performance get_assets_and_calls_performance
+get_pmax_diagnostics get_shopping_performance
+get_placements_and_video_performance analyze_auction_insights_csv
+update_campaign_conversion_goal set_conversion_action_primary
+exclude_placements add_account_negative_keywords
 """.split()
 )
 
@@ -78,7 +86,11 @@ def _tool_domain(tool_name: str) -> str:
         return "keyword-planner"
     if tool_name == "get_impression_share_losses":
         return "reporting-mcc"
-    if tool_name == "check_consent_signal_coverage":
+    if tool_name in {
+        "check_consent_signal_coverage",
+        "audit_conversion_tracking",
+        "get_offline_conversion_diagnostics",
+    }:
         return "conversions-recommendations"
     if tool_name == "get_auction_insights":
         return "reporting-mcc"

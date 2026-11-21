@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import time
 from collections import defaultdict, deque
@@ -13,6 +14,7 @@ import requests
 
 from .config import ensure_customer_allowed, get_settings
 from .errors import GoogleAdsError
+from .runtime import resolve_login_customer_id
 
 
 _rate_lock = RLock()
@@ -25,10 +27,22 @@ def _server_module():
     return google_ads_server
 
 
-def _headers(login_customer_id: str | None = None) -> dict[str, str]:
+def _headers(
+    customer_id: str | None = None,
+    login_customer_id: str | None = None,
+) -> dict[str, str]:
     server = _server_module()
     headers = server.get_headers(server.get_credentials())
-    if login_customer_id:
+    if customer_id is not None:
+        resolved_manager = resolve_login_customer_id(
+            customer_id,
+            explicit_login_customer_id=login_customer_id,
+        )
+        if resolved_manager:
+            headers["login-customer-id"] = resolved_manager
+        else:
+            headers.pop("login-customer-id", None)
+    elif login_customer_id:
         headers["login-customer-id"] = ensure_customer_allowed(login_customer_id)
     return headers
 
@@ -69,7 +83,7 @@ def request(
             response = requests.request(
                 method,
                 url,
-                headers=_headers(),
+                headers=_headers(customer_id=customer_id),
                 json=body,
                 params=params,
                 timeout=server.HTTP_TIMEOUT_SECONDS,
@@ -97,10 +111,46 @@ def request(
     raise RuntimeError(f"Google Ads request failed: {last_error}")
 
 
-def search(customer_id: str, query: str) -> list[dict[str, Any]]:
+DEFAULT_MAX_SEARCH_ROWS = 2000
+
+
+def _effective_max_rows(max_rows: int | None) -> int | None:
+    if max_rows is not None:
+        return max(1, int(max_rows))
+    raw = os.getenv("GOOGLE_ADS_MAX_SEARCH_ROWS", str(DEFAULT_MAX_SEARCH_ROWS)).strip()
+    if raw in {"0", ""}:
+        return None
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_MAX_SEARCH_ROWS
+
+
+def search_with_meta(
+    customer_id: str,
+    query: str,
+    *,
+    max_rows: int | None = None,
+) -> dict[str, Any]:
+    """Execute GAQL search with bounded row collection to protect LLM context windows."""
     customer_id = ensure_customer_allowed(customer_id)
+    limit = _effective_max_rows(max_rows)
+    from .demo import demo_search, is_demo_mode
+
+    if is_demo_mode():
+        rows = demo_search(customer_id, query)
+        truncated = bool(limit is not None and len(rows) > limit)
+        clipped = rows[:limit] if truncated else rows
+        return {
+            "rows": clipped,
+            "returned_rows": len(clipped),
+            "truncated": truncated,
+            "max_rows": limit,
+        }
+
     results: list[dict[str, Any]] = []
     page_token: str | None = None
+    truncated = False
     while True:
         # The REST googleAds:search endpoint fixes page size at 10000 rows and
         # rejects an explicit pageSize with PAGE_SIZE_NOT_SUPPORTED.
@@ -113,10 +163,31 @@ def search(customer_id: str, query: str) -> list[dict[str, Any]]:
             customer_id=customer_id,
             body=body,
         )
-        results.extend(response.get("results", []))
+        page_rows = response.get("results", [])
+        results.extend(page_rows)
         page_token = response.get("nextPageToken")
+        if limit is not None and len(results) >= limit:
+            if len(results) > limit or page_token:
+                truncated = True
+            results = results[:limit]
+            break
         if not page_token:
-            return results
+            break
+    return {
+        "rows": results,
+        "returned_rows": len(results),
+        "truncated": truncated,
+        "max_rows": limit,
+    }
+
+
+def search(
+    customer_id: str,
+    query: str,
+    *,
+    max_rows: int | None = None,
+) -> list[dict[str, Any]]:
+    return search_with_meta(customer_id, query, max_rows=max_rows)["rows"]
 
 
 def mutate(

@@ -5,18 +5,21 @@ from __future__ import annotations
 import html
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, timedelta
-from typing import Any, Optional
+from datetime import date, datetime, timedelta, timezone
+from typing import Annotated, Any, Optional
 
 from mcp.types import ToolAnnotations
+from pydantic import BaseModel, Field
 
-from .api import format_json, search
+from .api import format_json, search, search as _api_search, search_with_meta
 from .config import (
     client_display_name,
+    client_metadata,
     ensure_customer_allowed,
     get_settings,
     load_json_config,
 )
+from .dates import DateWindow, coverage_metadata, resolve_date_range
 from .governance import approvals, audited_tool
 
 
@@ -28,9 +31,25 @@ READ_ONLY = ToolAnnotations(
 )
 
 
-def _period(value: str) -> tuple[date, date]:
+def _period_window(
+    value: str | int | tuple[date, date],
+    *,
+    time_zone: str | None = None,
+    complete_days_only: bool = True,
+) -> DateWindow:
+    if isinstance(value, tuple):
+        return resolve_date_range(
+            time_zone=time_zone,
+            start_date=value[0].isoformat(),
+            end_date=value[1].isoformat(),
+        )
+    if isinstance(value, int):
+        return resolve_date_range(
+            days=value,
+            time_zone=time_zone,
+            complete_days_only=complete_days_only,
+        )
     normalized = value.strip().lower()
-    today = date.today()
     presets = {
         "week": 7,
         "last_week": 7,
@@ -43,18 +62,26 @@ def _period(value: str) -> tuple[date, date]:
         "trimestre": 90,
     }
     if normalized in presets:
-        days = presets[normalized]
-        return today - timedelta(days=days - 1), today
+        return resolve_date_range(
+            days=presets[normalized],
+            time_zone=time_zone,
+            complete_days_only=complete_days_only,
+        )
     if ":" in normalized:
         start_raw, end_raw = normalized.split(":", 1)
-        start = date.fromisoformat(start_raw)
-        end = date.fromisoformat(end_raw)
-        if start > end or (end - start).days > 365:
-            raise ValueError("Invalid period range")
-        return start, end
+        return resolve_date_range(
+            time_zone=time_zone,
+            start_date=start_raw,
+            end_date=end_raw,
+        )
     raise ValueError(
         "period must be week, month, quarter or YYYY-MM-DD:YYYY-MM-DD"
     )
+
+
+def _period(value: str) -> tuple[date, date]:
+    window = _period_window(value, complete_days_only=True)
+    return window.start, window.end
 
 
 def _clause(period: tuple[date, date]) -> str:
@@ -90,13 +117,51 @@ def _camel(value: str) -> str:
     return parts[0] + "".join(part.title() for part in parts[1:])
 
 
+def _account_metadata(customer_id: str) -> tuple[str, str | None]:
+    rows = search(
+        customer_id,
+        """
+        SELECT customer.currency_code, customer.time_zone
+        FROM customer
+        LIMIT 1
+        """,
+    )
+    customer = rows[0].get("customer", {}) if rows else {}
+    currency_code = (
+        customer.get("currencyCode")
+        or customer.get("currency_code")
+        or client_metadata(customer_id).get("currency")
+        or "UNKNOWN"
+    )
+    time_zone = customer.get("timeZone") or customer.get("time_zone")
+    return str(currency_code).upper(), str(time_zone) if time_zone else None
+
+
+def _search_bounded(customer_id: str, query: str) -> tuple[list[dict[str, Any]], bool]:
+    """Run bounded search returning `(rows, truncated)` while preserving `reports.search` monkeypatches."""
+    if search is not _api_search:
+        return search(customer_id, query), False
+    meta = search_with_meta(customer_id, query)
+    return meta["rows"], bool(meta["truncated"])
+
+
 def _report_data(
     customer_id: str,
-    period: tuple[date, date],
+    period_spec: str | int | tuple[date, date],
     include_recommendations: bool,
+    *,
+    complete_days_only: bool = True,
 ) -> dict[str, Any]:
     customer_id = ensure_customer_allowed(customer_id)
-    current_rows = search(
+    currency_code, time_zone = _account_metadata(customer_id)
+    window = _period_window(
+        period_spec,
+        time_zone=time_zone,
+        complete_days_only=complete_days_only,
+    )
+    period = (window.start, window.end)
+    coverage = coverage_metadata(currency_code=currency_code, window=window)
+    current_rows, current_truncated = _search_bounded(
         customer_id,
         f"""
         SELECT campaign.id, campaign.name, campaign.status,
@@ -110,7 +175,7 @@ def _report_data(
     length = (period[1] - period[0]).days + 1
     previous_end = period[0] - timedelta(days=1)
     previous = (previous_end - timedelta(days=length - 1), previous_end)
-    previous_rows = search(
+    previous_rows, previous_truncated = _search_bounded(
         customer_id,
         f"""
         SELECT metrics.impressions, metrics.clicks, metrics.cost_micros,
@@ -148,6 +213,7 @@ def _report_data(
     )
     current = _sum_metrics(current_rows)
     previous_totals = _sum_metrics(previous_rows)
+    any_truncated = bool(current_truncated or previous_truncated)
     variations: dict[str, float | None] = {}
     for metric in ("impressions", "clicks", "cost_micros", "conversions", "conversions_value"):
         old = previous_totals[metric]
@@ -162,9 +228,12 @@ def _report_data(
             LIMIT 20
             """,
         )
-    return {
+    payload: dict[str, Any] = {
         "customer_id": customer_id,
         "client_name": client_display_name(customer_id),
+        **coverage,
+        "truncated": any_truncated,
+        "totals_are_partial": any_truncated,
         "period": {"start": period[0].isoformat(), "end": period[1].isoformat()},
         "previous_period": {
             "start": previous[0].isoformat(),
@@ -178,6 +247,12 @@ def _report_data(
         "recommendations": recommendations,
         "suggested_next_actions": _suggestions(current, waste_rows, recommendations),
     }
+    if any_truncated:
+        payload["truncation_warning"] = (
+            "One or more queries reached GOOGLE_ADS_MAX_SEARCH_ROWS; account totals reflect only "
+            "the returned subset. Narrow the date range or raise GOOGLE_ADS_MAX_SEARCH_ROWS."
+        )
+    return payload
 
 
 def _suggestions(
@@ -201,21 +276,24 @@ def _suggestions(
 
 def _markdown_report(data: dict[str, Any], branding: dict[str, Any]) -> str:
     metrics = data["metrics"]
+    currency = data.get("currency_code") or "UNKNOWN"
+    currency_suffix = f" {currency}" if currency != "UNKNOWN" else ""
     lines = [
         f"# {branding.get('report_title', 'Google Ads performance report')}",
         "",
         f"**Client:** {data['client_name']}",
         f"**Agency:** {branding.get('agency_name', 'Agency')}",
+        f"**Currency:** {currency}",
         f"**Period:** {data['period']['start']} to {data['period']['end']}",
         "",
         "## Executive summary",
         "",
-        f"- Spend: {metrics['cost_micros'] / 1_000_000:,.2f}",
+        f"- Spend: {metrics['cost_micros'] / 1_000_000:,.2f}{currency_suffix}",
         f"- Impressions: {metrics['impressions']:,.0f}",
         f"- Clicks: {metrics['clicks']:,.0f}",
         f"- CTR: {metrics['ctr']:.2%}",
         f"- Conversions: {metrics['conversions']:,.2f}",
-        f"- CPA: {metrics['cpa_micros'] / 1_000_000:,.2f}",
+        f"- CPA: {metrics['cpa_micros'] / 1_000_000:,.2f}{currency_suffix}",
         "",
         "## Suggested next actions",
         "",
@@ -246,6 +324,70 @@ def _html_report(data: dict[str, Any], branding: dict[str, Any]) -> str:
 </html>"""
 
 
+def _consolidate_by_currency(
+    results: dict[str, Any],
+) -> tuple[dict[str, float] | None, dict[str, dict[str, float]], list[str], bool, str | None]:
+    """Aggregate client metrics strictly per currency to avoid mixing currencies."""
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for item in results.values():
+        if "metrics" not in item:
+            continue
+        currency = str(item.get("currency_code") or "UNKNOWN").upper()
+        buckets.setdefault(currency, []).append({"metrics": item["metrics"]})
+
+    currencies = sorted(buckets)
+    totals_by_currency = {
+        currency: _sum_metrics(rows) for currency, rows in sorted(buckets.items())
+    }
+    if not currencies:
+        return _sum_metrics([]), {}, [], False, None
+    if len(currencies) == 1:
+        only_currency = currencies[0]
+        return (
+            {"currency_code": only_currency, **totals_by_currency[only_currency]},
+            totals_by_currency,
+            currencies,
+            False,
+            None,
+        )
+    warning = (
+        f"Clients use multiple currencies ({', '.join(currencies)}). "
+        "Totals are separated in managed_totals_by_currency and not combined."
+    )
+    return None, totals_by_currency, currencies, True, warning
+
+
+def _resolve_alert_customer_ids(
+    customer_ids: Optional[list[str]],
+    alert_config: dict[str, Any],
+) -> list[str]:
+    """Resolve target customer IDs for check_alerts without treating 'defaults' as a customer."""
+    if customer_ids:
+        return list(customer_ids)
+    configured = [key for key in alert_config if key != "defaults"]
+    if configured:
+        return configured
+    clients = load_json_config("clients.json", {})
+    if clients:
+        return list(clients)
+    allowed = sorted(get_settings().allowed_customer_ids)
+    if allowed:
+        return allowed
+    raise ValueError(
+        "Provide customer_ids or configure customer entries in alerts.json, "
+        "clients.json, or ALLOWED_CUSTOMER_IDS"
+    )
+
+
+class ReportBranding(BaseModel):
+    """Typed branding overrides for white-label reports (strict JSON Schema compatible)."""
+
+    agency_name: Optional[str] = Field(default=None, description="Agency display name")
+    report_title: Optional[str] = Field(default=None, description="Custom report title")
+    primary_color: Optional[str] = Field(default=None, description="Hex brand color (e.g. #1a73e8)")
+    logo_url: Optional[str] = Field(default=None, description="Optional agency logo URL")
+
+
 def register_report_tools(mcp) -> None:
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
@@ -254,13 +396,24 @@ def register_report_tools(mcp) -> None:
         period: str = "month",
         include_recommendations: bool = True,
         format: str = "markdown",
-        branding: Optional[dict[str, Any]] = None,
+        branding: Optional[ReportBranding] = None,
+        complete_days_only: bool = True,
     ) -> str:
-        """Generate a white-label client report in JSON, Markdown or HTML."""
-        data = _report_data(customer_id, _period(period), include_recommendations)
+        """Generate a white-label client report in JSON, Markdown or HTML using the account time zone."""
+        data = _report_data(
+            customer_id,
+            period,
+            include_recommendations,
+            complete_days_only=complete_days_only,
+        )
+        branding_overrides: dict[str, Any] = {}
+        if isinstance(branding, ReportBranding):
+            branding_overrides = branding.model_dump(exclude_none=True)
+        elif isinstance(branding, dict):
+            branding_overrides = {k: v for k, v in branding.items() if v is not None}
         effective_branding = {
             **load_json_config("branding.json", {}),
-            **(branding or {}),
+            **branding_overrides,
         }
         format = format.strip().lower()
         if format == "json":
@@ -273,19 +426,27 @@ def register_report_tools(mcp) -> None:
 
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
-    def generate_agency_dashboard(days: int = 30) -> str:
-        """Generate consolidated spend, metrics, alerts and pending work for all clients."""
+    def generate_agency_dashboard(
+        days: int = 30,
+        complete_days_only: bool = True,
+    ) -> str:
+        """Generate consolidated spend, metrics, alerts and pending work for all clients (currencies separated)."""
         if not 1 <= days <= 365:
             raise ValueError("days must be between 1 and 365")
         clients = load_json_config("clients.json", {})
         customer_ids = list(clients) or list(get_settings().allowed_customer_ids)
         if not customer_ids:
             raise ValueError("Configure clients.json or ALLOWED_CUSTOMER_IDS")
-        period = (date.today() - timedelta(days=days - 1), date.today())
         results: dict[str, Any] = {}
         with ThreadPoolExecutor(max_workers=min(8, len(customer_ids))) as pool:
             futures = {
-                pool.submit(_report_data, customer_id, period, False): customer_id
+                pool.submit(
+                    _report_data,
+                    customer_id,
+                    days,
+                    False,
+                    complete_days_only=complete_days_only,
+                ): customer_id
                 for customer_id in customer_ids
             }
             for future in as_completed(futures):
@@ -294,9 +455,13 @@ def register_report_tools(mcp) -> None:
                     results[customer_id] = future.result()
                 except Exception as error:
                     results[customer_id] = {"error": str(error)}
-        totals = _sum_metrics(
-            [{"metrics": item.get("metrics", {})} for item in results.values() if "metrics" in item]
-        )
+        (
+            totals,
+            totals_by_currency,
+            currencies,
+            mixed_currencies,
+            currency_warning,
+        ) = _consolidate_by_currency(results)
         pending = [
             item for item in approvals().values() if item.get("status") == "pending"
         ]
@@ -305,11 +470,13 @@ def register_report_tools(mcp) -> None:
         for customer_id, result in results.items():
             if "metrics" not in result:
                 continue
+            normalized_cid = result.get("customer_id", customer_id)
             thresholds = {
                 **alert_config.get("defaults", {}),
-                **alert_config.get(customer_id, {}),
+                **alert_config.get(normalized_cid, {}),
             }
             metrics = result["metrics"]
+            currency_code = result.get("currency_code") or "UNKNOWN"
             average_daily_spend = metrics["cost_micros"] / days
             if (
                 thresholds.get("max_daily_spend_micros")
@@ -318,7 +485,8 @@ def register_report_tools(mcp) -> None:
             ):
                 dashboard_alerts.append(
                     {
-                        "customer_id": customer_id,
+                        "customer_id": normalized_cid,
+                        "currency_code": currency_code,
                         "type": "average_daily_spend",
                         "actual": average_daily_spend,
                         "threshold": thresholds["max_daily_spend_micros"],
@@ -330,21 +498,42 @@ def register_report_tools(mcp) -> None:
             ):
                 dashboard_alerts.append(
                     {
-                        "customer_id": customer_id,
+                        "customer_id": normalized_cid,
+                        "currency_code": currency_code,
                         "type": "low_ctr",
                         "actual": metrics["ctr"],
                         "threshold": thresholds["min_ctr"],
                     }
                 )
-        return format_json(
-            {
-                "period_days": days,
-                "managed_totals": totals,
-                "clients": results,
-                "pending_approvals": len(pending),
-                "alerts": dashboard_alerts,
-            }
+        truncated_clients = sorted(
+            cid_key
+            for cid_key, item in results.items()
+            if isinstance(item, dict) and item.get("truncated")
         )
+        any_client_truncated = bool(truncated_clients)
+        payload: dict[str, Any] = {
+            "period_days": days,
+            "complete_days_only": complete_days_only,
+            "queried_at_utc": datetime.now(timezone.utc).isoformat(),
+            "currencies": currencies,
+            "mixed_currencies": mixed_currencies,
+            "truncated": any_client_truncated,
+            "totals_are_partial": any_client_truncated,
+            "managed_totals": totals,
+            "managed_totals_by_currency": totals_by_currency,
+            "clients": results,
+            "pending_approvals": len(pending),
+            "alerts": dashboard_alerts,
+        }
+        if currency_warning:
+            payload["currency_warning"] = currency_warning
+        if any_client_truncated:
+            payload["truncated_customer_ids"] = truncated_clients
+            payload["truncation_warning"] = (
+                f"One or more client reports reached GOOGLE_ADS_MAX_SEARCH_ROWS ({', '.join(truncated_clients)}); "
+                "agency totals include partial client metrics."
+            )
+        return format_json(payload)
 
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
@@ -359,29 +548,38 @@ def register_report_tools(mcp) -> None:
             "conversions",
             "conversions_value",
         ],
+        complete_days_only: bool = True,
     ) -> str:
-        """Compare account metrics between two explicit or preset periods."""
+        """Compare account metrics between two explicit or preset periods in the account time zone."""
         allowed = {
             "impressions", "clicks", "cost_micros", "conversions", "conversions_value"
         }
         if set(metrics) - allowed:
             raise ValueError(f"Unsupported metrics: {sorted(set(metrics) - allowed)}")
 
-        def totals(period_value: str) -> dict[str, float]:
-            parsed = _period(period_value)
-            rows = search(
-                customer_id,
+        cid = ensure_customer_allowed(customer_id)
+        currency_code, time_zone = _account_metadata(cid)
+
+        def totals(period_value: str) -> tuple[DateWindow, dict[str, float], bool]:
+            win = _period_window(
+                period_value,
+                time_zone=time_zone,
+                complete_days_only=complete_days_only,
+            )
+            rows, is_truncated = _search_bounded(
+                cid,
                 f"""
                 SELECT metrics.impressions, metrics.clicks, metrics.cost_micros,
                        metrics.conversions, metrics.conversions_value
                 FROM customer
-                WHERE {_clause(parsed)}
+                WHERE {win.gaql_clause}
                 """,
             )
-            return _sum_metrics(rows)
+            return win, _sum_metrics(rows), is_truncated
 
-        a = totals(period_a)
-        b = totals(period_b)
+        win_a, a, trunc_a = totals(period_a)
+        win_b, b, trunc_b = totals(period_b)
+        any_truncated = bool(trunc_a or trunc_b)
         comparison = {}
         for metric in metrics:
             absolute = b[metric] - a[metric]
@@ -391,7 +589,168 @@ def register_report_tools(mcp) -> None:
                 "absolute_change": absolute,
                 "percentage_change": absolute / a[metric] * 100 if a[metric] else None,
             }
-        return format_json(comparison)
+        comp_payload: dict[str, Any] = {
+            "customer_id": cid,
+            "currency_code": currency_code,
+            "time_zone": win_b.time_zone,
+            "queried_at_utc": datetime.now(timezone.utc).isoformat(),
+            "period_a": win_a.to_dict(),
+            "period_b": win_b.to_dict(),
+            "truncated": any_truncated,
+            "totals_are_partial": any_truncated,
+            "conversion_lag_warning": win_b.conversion_lag_warning or win_a.conversion_lag_warning,
+            "metrics": comparison,
+        }
+        if any_truncated:
+            comp_payload["truncation_warning"] = (
+                "One or more period queries reached GOOGLE_ADS_MAX_SEARCH_ROWS; "
+                "compared totals reflect only the returned subset."
+            )
+        return format_json(comp_payload)
+
+    @mcp.tool(annotations=READ_ONLY)
+    @audited_tool
+    def get_performance_trends(
+        customer_id: Annotated[str, Field(description="Google Ads 10-digit customer ID")],
+        days: Annotated[int, Field(description="Lookback window (1 to 365 days)")] = 30,
+        granularity: Annotated[
+            str,
+            Field(description="Aggregation granularity: 'total', 'daily', or 'weekly'"),
+        ] = "daily",
+        complete_days_only: Annotated[
+            bool,
+            Field(description="Exclude the current incomplete day in the account time zone (recommended)"),
+        ] = True,
+        campaign_id: Annotated[
+            Optional[str],
+            Field(description="Optional campaign ID filter"),
+        ] = None,
+        include_conversions_by_conversion_date: Annotated[
+            bool,
+            Field(description="Include conversions_by_conversion_date alongside interaction-date conversions"),
+        ] = True,
+    ) -> str:
+        """Return total, daily, or weekly performance trends with timezone, currency, and conversion-lag metadata."""
+        cid = ensure_customer_allowed(customer_id)
+        gran = (granularity or "daily").strip().lower()
+        if gran not in {"total", "daily", "weekly"}:
+            raise ValueError("granularity must be 'total', 'daily', or 'weekly'")
+        if campaign_id is not None:
+            clean_camp = str(campaign_id).strip()
+            if not clean_camp.isdigit() or int(clean_camp) <= 0:
+                raise ValueError("campaign_id must be a positive integer")
+        else:
+            clean_camp = None
+
+        currency_code, time_zone = _account_metadata(cid)
+        window = resolve_date_range(
+            days=days,
+            time_zone=time_zone,
+            complete_days_only=complete_days_only,
+        )
+        coverage = coverage_metadata(currency_code=currency_code, window=window)
+
+        segment_field = {
+            "total": None,
+            "daily": "segments.date",
+            "weekly": "segments.week",
+        }[gran]
+        select_fields = [
+            "metrics.impressions",
+            "metrics.clicks",
+            "metrics.cost_micros",
+            "metrics.conversions",
+            "metrics.conversions_value",
+        ]
+        if include_conversions_by_conversion_date:
+            select_fields.extend(
+                [
+                    "metrics.conversions_by_conversion_date",
+                    "metrics.conversions_value_by_conversion_date",
+                ]
+            )
+        if segment_field:
+            select_fields.insert(0, segment_field)
+
+        resource = "campaign" if clean_camp else "customer"
+        where_parts = [window.gaql_clause]
+        if clean_camp:
+            where_parts.append(f"campaign.id = {clean_camp}")
+        order_clause = f"ORDER BY {segment_field} ASC" if segment_field else ""
+        query = (
+            f"SELECT {', '.join(select_fields)} "
+            f"FROM {resource} "
+            f"WHERE {' AND '.join(where_parts)} "
+            f"{order_clause}"
+        )
+        meta = search_with_meta(cid, query)
+        series: list[dict[str, Any]] = []
+        total_by_conv_date = 0.0
+        total_val_by_conv_date = 0.0
+        for row in meta["rows"]:
+            m = row.get("metrics", {}) or {}
+            seg = row.get("segments", {}) or {}
+            impressions = float(m.get("impressions") or 0)
+            clicks = float(m.get("clicks") or 0)
+            cost_micros = float(m.get("costMicros") or m.get("cost_micros") or 0)
+            conversions = float(m.get("conversions") or 0)
+            conv_value = float(m.get("conversionsValue") or m.get("conversions_value") or 0)
+            point: dict[str, Any] = {
+                "impressions": impressions,
+                "clicks": clicks,
+                "ctr": round(clicks / impressions, 4) if impressions else 0.0,
+                "cost_micros": cost_micros,
+                "conversions": conversions,
+                "conversions_value": conv_value,
+            }
+            if segment_field == "segments.date":
+                point["date"] = seg.get("date")
+            elif segment_field == "segments.week":
+                point["week"] = seg.get("week")
+            if include_conversions_by_conversion_date:
+                conv_cd = float(
+                    m.get("conversionsByConversionDate")
+                    or m.get("conversions_by_conversion_date")
+                    or 0
+                )
+                val_cd = float(
+                    m.get("conversionsValueByConversionDate")
+                    or m.get("conversions_value_by_conversion_date")
+                    or 0
+                )
+                point["conversions_by_conversion_date"] = conv_cd
+                point["conversions_value_by_conversion_date"] = val_cd
+                total_by_conv_date += conv_cd
+                total_val_by_conv_date += val_cd
+            series.append(point)
+
+        totals = _sum_metrics(meta["rows"])
+        if include_conversions_by_conversion_date:
+            totals["conversions_by_conversion_date"] = round(total_by_conv_date, 4)
+            totals["conversions_value_by_conversion_date"] = round(total_val_by_conv_date, 4)
+
+        payload: dict[str, Any] = {
+            "customer_id": cid,
+            "client_name": client_display_name(cid),
+            "campaign_id": clean_camp,
+            "granularity": gran,
+            **coverage,
+            "returned_rows": meta["returned_rows"],
+            "truncated": meta["truncated"],
+            "totals_are_partial": meta["truncated"],
+            "totals": totals,
+            "series": series,
+            "conversion_date_note": (
+                "`conversions` attributes events to the ad interaction (click) date; "
+                "`conversions_by_conversion_date` attributes them to the date the conversion occurred."
+            ),
+        }
+        if meta["truncated"]:
+            payload["truncation_warning"] = (
+                "Trend query reached GOOGLE_ADS_MAX_SEARCH_ROWS; totals and series reflect only "
+                "the returned subset."
+            )
+        return format_json(payload)
 
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
@@ -399,13 +758,22 @@ def register_report_tools(mcp) -> None:
         customer_id: str,
         days: int = 30,
         min_waste_micros: int = 1_000_000,
+        complete_days_only: bool = True,
     ) -> str:
-        """Detect and prioritize non-converting spend and low-value traffic."""
+        """Detect and prioritize non-converting spend and low-value traffic in the account time zone."""
         if min_waste_micros < 0:
             raise ValueError("min_waste_micros cannot be negative")
-        period = (date.today() - timedelta(days=days - 1), date.today())
-        terms = search(
-            customer_id,
+        cid = ensure_customer_allowed(customer_id)
+        currency_code, time_zone = _account_metadata(cid)
+        window = resolve_date_range(
+            days=days,
+            time_zone=time_zone,
+            complete_days_only=complete_days_only,
+        )
+        period = (window.start, window.end)
+        coverage = coverage_metadata(currency_code=currency_code, window=window)
+        terms, terms_truncated = _search_bounded(
+            cid,
             f"""
             SELECT search_term_view.search_term, campaign.id, campaign.name,
                    ad_group.id, ad_group.name, metrics.impressions,
@@ -418,7 +786,7 @@ def register_report_tools(mcp) -> None:
             """,
         )
         keywords = search(
-            customer_id,
+            cid,
             f"""
             SELECT ad_group_criterion.criterion_id,
                    ad_group_criterion.keyword.text,
@@ -434,7 +802,7 @@ def register_report_tools(mcp) -> None:
             """,
         )
         ad_groups = search(
-            customer_id,
+            cid,
             f"""
             SELECT campaign.id, campaign.name, ad_group.id, ad_group.name,
                    metrics.impressions, metrics.clicks,
@@ -449,7 +817,7 @@ def register_report_tools(mcp) -> None:
             """,
         )
         campaigns = search(
-            customer_id,
+            cid,
             f"""
             SELECT campaign.id, campaign.name,
                    metrics.search_impression_share,
@@ -462,20 +830,27 @@ def register_report_tools(mcp) -> None:
             LIMIT 100
             """,
         )
-        return format_json(
-            {
-                "customer_id": ensure_customer_allowed(customer_id),
-                "period": {"start": period[0].isoformat(), "end": period[1].isoformat()},
-                "wasted_search_terms": terms,
-                "low_ctr_keywords": keywords,
-                "non_converting_ad_groups": ad_groups,
-                "budget_limited_campaigns": campaigns,
-                "total_detected_waste_micros": sum(
-                    int(row.get("metrics", {}).get("costMicros", 0)) for row in terms
-                ),
-                "warning": "Detected waste is advisory; review relevance before adding negatives.",
-            }
-        )
+        waste_payload: dict[str, Any] = {
+            "customer_id": cid,
+            **coverage,
+            "truncated": terms_truncated,
+            "totals_are_partial": terms_truncated,
+            "period": {"start": period[0].isoformat(), "end": period[1].isoformat()},
+            "wasted_search_terms": terms,
+            "low_ctr_keywords": keywords,
+            "non_converting_ad_groups": ad_groups,
+            "budget_limited_campaigns": campaigns,
+            "total_detected_waste_micros": sum(
+                int(row.get("metrics", {}).get("costMicros", 0)) for row in terms
+            ),
+            "warning": "Detected waste is advisory; review relevance before adding negatives.",
+        }
+        if terms_truncated:
+            waste_payload["truncation_warning"] = (
+                "Wasted search terms query reached GOOGLE_ADS_MAX_SEARCH_ROWS; "
+                "total_detected_waste_micros reflects only the returned subset."
+            )
+        return format_json(waste_payload)
 
     @mcp.tool(annotations=READ_ONLY)
     @audited_tool
@@ -483,11 +858,20 @@ def register_report_tools(mcp) -> None:
         customer_id: str,
         days: int = 30,
         min_waste_micros: int = 1_000_000,
+        complete_days_only: bool = True,
     ) -> str:
-        """Generate prioritized, non-executing MCP actions from current account data."""
-        period = (date.today() - timedelta(days=days - 1), date.today())
+        """Generate prioritized, non-executing MCP actions from current account data in the account time zone."""
+        cid = ensure_customer_allowed(customer_id)
+        currency_code, time_zone = _account_metadata(cid)
+        window = resolve_date_range(
+            days=days,
+            time_zone=time_zone,
+            complete_days_only=complete_days_only,
+        )
+        period = (window.start, window.end)
+        coverage = coverage_metadata(currency_code=currency_code, window=window)
         terms = search(
-            customer_id,
+            cid,
             f"""
             SELECT search_term_view.search_term, campaign.id,
                    metrics.cost_micros, metrics.conversions
@@ -500,7 +884,7 @@ def register_report_tools(mcp) -> None:
             """,
         )
         ads = search(
-            customer_id,
+            cid,
             f"""
             SELECT ad_group.id, ad_group_ad.ad.id,
                    metrics.impressions, metrics.clicks,
@@ -516,7 +900,7 @@ def register_report_tools(mcp) -> None:
             """,
         )
         constrained = search(
-            customer_id,
+            cid,
             f"""
             SELECT campaign.id, campaign.name, campaign.primary_status_reasons,
                    campaign_budget.id, campaign_budget.amount_micros,
@@ -538,7 +922,7 @@ def register_report_tools(mcp) -> None:
                     "evidence": row,
                     "tool": "add_negative_keyword",
                     "arguments": {
-                        "customer_id": ensure_customer_allowed(customer_id),
+                        "customer_id": cid,
                         "level": "CAMPAIGN",
                         "parent_id": row["campaign"]["id"],
                         "keyword_text": row["searchTermView"]["searchTerm"],
@@ -555,7 +939,7 @@ def register_report_tools(mcp) -> None:
                     "evidence": row,
                     "tool": "pause_ad",
                     "arguments": {
-                        "customer_id": ensure_customer_allowed(customer_id),
+                        "customer_id": cid,
                         "ad_group_id": row["adGroup"]["id"],
                         "ad_id": row["adGroupAd"]["ad"]["id"],
                         "dry_run": True,
@@ -576,7 +960,7 @@ def register_report_tools(mcp) -> None:
                     "evidence": row,
                     "tool": "update_campaign_budget",
                     "arguments": {
-                        "customer_id": ensure_customer_allowed(customer_id),
+                        "customer_id": cid,
                         "budget_id": row["campaignBudget"]["id"],
                         "new_amount_micros": int(current * 1.2),
                         "dry_run": True,
@@ -585,7 +969,9 @@ def register_report_tools(mcp) -> None:
             )
         return format_json(
             {
-                "customer_id": ensure_customer_allowed(customer_id),
+                "customer_id": cid,
+                **coverage,
+                "period": {"start": period[0].isoformat(), "end": period[1].isoformat()},
                 "generated_at": date.today().isoformat(),
                 "actions": actions,
                 "executed": False,
@@ -598,7 +984,7 @@ def register_report_tools(mcp) -> None:
     def check_alerts(customer_ids: Optional[list[str]] = None) -> str:
         """Evaluate configured spend, CTR, CPA and waste thresholds."""
         alert_config = load_json_config("alerts.json", {})
-        ids = customer_ids or list(alert_config) or list(get_settings().allowed_customer_ids)
+        ids = _resolve_alert_customer_ids(customer_ids, alert_config)
         alerts: list[dict[str, Any]] = []
         for customer_id in ids:
             normalized = ensure_customer_allowed(customer_id)

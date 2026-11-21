@@ -40,10 +40,10 @@ Ejecutar antes de tocar creatividades, antes de escalar presupuesto y como paso 
 | `ALL_PENDING` | Toda la cuenta sin serving history todavía. |
 | `NO_ADS_MATCHED_FILTER` | El filtro no devolvió RSAs. |
 
-### Ejemplo (Clariola)
+### Ejemplo
 
 ```text
-get_ad_strength_diagnostics(customer_id="5461642152", days=30)
+get_ad_strength_diagnostics(customer_id="1234567890", days=30)
 ```
 
 Devuelve 7 RSAs (1 AVERAGE, 6 sin scorear), 92 assets PENDING, recomendación `ALL_PENDING`.

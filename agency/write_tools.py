@@ -57,6 +57,8 @@ def _write(
     previous_state: Any = None,
     idempotency_key: str | None = None,
     batch: bool = False,
+    state_verifier: Any = None,
+    stale_state_fields: tuple[str, ...] | None = None,
 ) -> str:
     return execute_mutation(
         tool_name=tool,
@@ -70,6 +72,8 @@ def _write(
         previous_state=previous_state,
         idempotency_key=idempotency_key,
         batch=batch,
+        state_verifier=state_verifier,
+        stale_state_fields=stale_state_fields,
     )
 
 
@@ -303,6 +307,8 @@ def _register_campaign_tools(mcp) -> None:
             confirmation_text,
             expected_confirmation=expected,
             previous_state=budget,
+            state_verifier=lambda: budget,
+            stale_state_fields=("amountMicros",),
         )
 
     def create_campaign(
@@ -629,6 +635,8 @@ def _register_campaign_tools(mcp) -> None:
             tool, customer_id, "campaigns", [operation], dry_run, approval_id,
             confirmation_text, expected_confirmation=expected_text,
             previous_state=campaign,
+            state_verifier=lambda: campaign,
+            stale_state_fields=("status",),
         )
 
     @mcp.tool(annotations=WRITE)
@@ -1320,13 +1328,21 @@ def _register_keyword_tools(mcp) -> None:
         keyword_rows = search(
             customer_id,
             f"""
-            SELECT ad_group_criterion.cpc_bid_micros
+            SELECT ad_group_criterion.criterion_id,
+                   ad_group_criterion.cpc_bid_micros
             FROM ad_group_criterion
             WHERE ad_group.id = {_id(ad_group_id, 'ad_group_id')}
               AND ad_group_criterion.type = KEYWORD
               AND ad_group_criterion.status != REMOVED
             """,
         )
+        target_criterion_id = _id(ad_group_criterion_id, "ad_group_criterion_id")
+        current_kw_state: dict[str, Any] | None = None
+        for row in keyword_rows:
+            crit = row.get("adGroupCriterion", {}) or {}
+            if str(crit.get("criterionId") or "") == target_criterion_id:
+                current_kw_state = {"cpcBidMicros": crit.get("cpcBidMicros")}
+                break
         bids = [
             int(row.get("adGroupCriterion", {}).get("cpcBidMicros", 0))
             for row in keyword_rows
@@ -1343,7 +1359,7 @@ def _register_keyword_tools(mcp) -> None:
         resource_name = (
             f"customers/{ensure_customer_allowed(customer_id)}/adGroupCriteria/"
             f"{_id(ad_group_id, 'ad_group_id')}~"
-            f"{_id(ad_group_criterion_id, 'ad_group_criterion_id')}"
+            f"{target_criterion_id}"
         )
         operation = _update_operation(
             {"resourceName": resource_name, "cpcBidMicros": str(new_bid_micros)},
@@ -1353,6 +1369,9 @@ def _register_keyword_tools(mcp) -> None:
             "update_keyword_bid", customer_id, "adGroupCriteria", [operation],
             dry_run, approval_id, confirmation_text,
             expected_confirmation=expected,
+            previous_state=current_kw_state,
+            state_verifier=(lambda: current_kw_state) if current_kw_state is not None else None,
+            stale_state_fields=("cpcBidMicros",),
         )
 
     def keyword_status(

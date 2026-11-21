@@ -8,6 +8,7 @@ import requests
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Lock
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
@@ -21,6 +22,8 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from agency.governance import audited_tool
 from agency.config import get_settings
+from agency.demo import DEMO_ACCOUNTS, DEMO_CUSTOMER_IDS, demo_search, is_demo_mode
+from agency.modules import PRESETS, configure_tool_catalog, get_active_catalog_info
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -49,8 +52,9 @@ SCOPES = ['https://www.googleapis.com/auth/adwords']
 try:
     from dotenv import load_dotenv
     # Load from .env file if it exists
-    load_dotenv()
-    logger.info("Environment variables loaded from .env file")
+    if not os.environ.get("GOOGLE_ADS_MANAGED_PROFILE"):
+        load_dotenv()
+        logger.info("Environment variables loaded from .env file")
 except ImportError:
     logger.warning("python-dotenv not installed, skipping .env file loading")
 
@@ -60,6 +64,9 @@ GOOGLE_ADS_DEVELOPER_TOKEN = os.environ.get("GOOGLE_ADS_DEVELOPER_TOKEN")
 GOOGLE_ADS_LOGIN_CUSTOMER_ID = os.environ.get("GOOGLE_ADS_LOGIN_CUSTOMER_ID", "")
 GOOGLE_ADS_AUTH_TYPE = os.environ.get("GOOGLE_ADS_AUTH_TYPE", "oauth")  # oauth or service_account
 GOOGLE_ADS_TOKEN_PATH = os.environ.get("GOOGLE_ADS_TOKEN_PATH")
+MANAGED_PROFILE = os.environ.get("GOOGLE_ADS_MANAGED_PROFILE")
+MANAGED_CREDENTIALS: Optional[Credentials] = None
+MANAGED_CREDENTIALS_LOCK = Lock()
 HTTP_TIMEOUT_SECONDS = float(os.environ.get("GOOGLE_ADS_HTTP_TIMEOUT_SECONDS", "30"))
 API_VERSION = os.environ.get("GOOGLE_ADS_API_VERSION", "v25")
 READ_ONLY_TOOL = ToolAnnotations(
@@ -76,6 +83,21 @@ LOCAL_WRITE_TOOL = ToolAnnotations(
 )
 
 
+class _DemoResponse:
+    """Minimal requests.Response-compatible object for --demo mode."""
+
+    def __init__(self, status_code: int, payload: Dict[str, Any]) -> None:
+        self.status_code = status_code
+        self.ok = 200 <= status_code < 300
+        self._payload = payload
+        self.text = json.dumps(payload, ensure_ascii=False)
+        self.content = self.text.encode("utf-8")
+        self.headers: Dict[str, str] = {"content-type": "application/json"}
+
+    def json(self) -> Dict[str, Any]:
+        return self._payload
+
+
 def http_get(url: str, **kwargs):
     """Make a bounded HTTP GET request to avoid hanging MCP tool calls."""
     kwargs.setdefault("timeout", HTTP_TIMEOUT_SECONDS)
@@ -84,6 +106,12 @@ def http_get(url: str, **kwargs):
 
 def http_post(url: str, **kwargs):
     """Make a bounded HTTP POST request to avoid hanging MCP tool calls."""
+    if is_demo_mode():
+        match = re.search(r"/customers/(\d{10})/googleAds:search\b", url)
+        if match:
+            cid = match.group(1)
+            query = (kwargs.get("json") or {}).get("query", "")
+            return _DemoResponse(200, {"results": demo_search(cid, query)})
     kwargs.setdefault("timeout", HTTP_TIMEOUT_SECONDS)
     return requests.post(url, **kwargs)
 
@@ -92,6 +120,41 @@ def http_post(url: str, **kwargs):
 @audited_tool
 def server_status() -> Dict[str, Any]:
     """Check server readiness without exposing credential values or secrets."""
+    if is_demo_mode():
+        agency_settings = get_settings()
+        return {
+            "server": "google-ads-mcp",
+            "package": "google-ads-mcp-server",
+            "ready": True,
+            "demo_mode": True,
+            "demo_accounts": [
+                {
+                    "customer_id": cid,
+                    "name": meta["name"],
+                    "currency_code": meta["currency_code"],
+                    "time_zone": meta["time_zone"],
+                }
+                for cid, meta in DEMO_ACCOUNTS.items()
+            ],
+            "auth_type": "demo",
+            "credentials_configured": True,
+            "developer_token_configured": False,
+            "login_customer_configured": False,
+            "oauth_token_present": None,
+            "google_ads_api_version": API_VERSION,
+            "agency": {
+                "operator_configured": True,
+                "read_only_mode": agency_settings.read_only_mode,
+                "allowed_customer_count": len(agency_settings.allowed_customer_ids),
+                "blocked_tool_count": len(agency_settings.blocked_tools),
+                "client_approval_required": agency_settings.client_approval_required,
+                "warnings": [
+                    "Running in --demo mode with synthetic data (no Google Ads API calls or credentials required)."
+                ],
+            },
+            "catalog": get_active_catalog_info(mcp),
+            "issues": [],
+        }
     issues = []
     auth_type = GOOGLE_ADS_AUTH_TYPE.strip().lower()
     credentials_path = (
@@ -102,9 +165,10 @@ def server_status() -> Dict[str, Any]:
 
     if auth_type not in {"oauth", "service_account"}:
         issues.append("GOOGLE_ADS_AUTH_TYPE must be oauth or service_account")
-    if not GOOGLE_ADS_DEVELOPER_TOKEN:
-        issues.append("GOOGLE_ADS_DEVELOPER_TOKEN is not configured")
-    if not credentials_path:
+    if MANAGED_PROFILE:
+        if not MANAGED_CREDENTIALS or not MANAGED_CREDENTIALS.refresh_token:
+            issues.append("Google connection must be renewed with google-ads-mcp-connect connect")
+    elif not credentials_path:
         issues.append("GOOGLE_ADS_CREDENTIALS_PATH is not configured")
     elif not credentials_path.exists():
         issues.append("The configured Google Ads credentials file does not exist")
@@ -112,7 +176,9 @@ def server_status() -> Dict[str, Any]:
         issues.append("GOOGLE_ADS_API_VERSION must use a value such as v25")
 
     oauth_token_present = None
-    if auth_type == "oauth" and credentials_path and credentials_path.exists():
+    if MANAGED_PROFILE:
+        oauth_token_present = not issues
+    elif auth_type == "oauth" and credentials_path and credentials_path.exists():
         token_path = Path(GOOGLE_ADS_TOKEN_PATH).expanduser() if GOOGLE_ADS_TOKEN_PATH else None
         try:
             credentials_data = json.loads(credentials_path.read_text(encoding="utf-8"))
@@ -136,7 +202,7 @@ def server_status() -> Dict[str, Any]:
         "server": "google-ads-mcp",
         "ready": not issues,
         "auth_type": auth_type,
-        "credentials_configured": bool(credentials_path and credentials_path.exists()),
+        "credentials_configured": oauth_token_present if MANAGED_PROFILE else bool(credentials_path and credentials_path.exists()),
         "developer_token_configured": bool(GOOGLE_ADS_DEVELOPER_TOKEN),
         "login_customer_configured": bool(GOOGLE_ADS_LOGIN_CUSTOMER_ID),
         "oauth_token_present": oauth_token_present,
@@ -149,6 +215,7 @@ def server_status() -> Dict[str, Any]:
             "client_approval_required": agency_settings.client_approval_required,
             "warnings": agency_warnings,
         },
+        "catalog": get_active_catalog_info(mcp),
         "issues": issues,
     }
 
@@ -187,6 +254,10 @@ def get_credentials():
     Returns:
         Valid credentials object to use with Google Ads API
     """
+    if is_demo_mode():
+        return None
+    if MANAGED_PROFILE:
+        return get_oauth_credentials()
     if not GOOGLE_ADS_CREDENTIALS_PATH:
         raise ValueError("GOOGLE_ADS_CREDENTIALS_PATH environment variable not set")
 
@@ -258,6 +329,17 @@ def refresh_credentials_with_retry(creds, attempts: int = 3):
 
 def get_oauth_credentials():
     """Get and refresh OAuth user credentials."""
+    if MANAGED_PROFILE:
+        with MANAGED_CREDENTIALS_LOCK:
+            credentials = MANAGED_CREDENTIALS
+            if not credentials or not credentials.refresh_token:
+                raise ValueError("Google authorization is missing. Run google-ads-mcp-connect connect.")
+            if not credentials.valid:
+                try:
+                    credentials.refresh(Request())
+                except RefreshError:
+                    raise ValueError("Google authorization could not be refreshed. Run google-ads-mcp-connect connect again.") from None
+            return credentials
     creds = None
     client_config = None
     credentials_path = Path(GOOGLE_ADS_CREDENTIALS_PATH).expanduser()
@@ -345,9 +427,11 @@ def get_oauth_credentials():
 
 def get_headers(creds):
     """Get headers for Google Ads API requests."""
-    if not GOOGLE_ADS_DEVELOPER_TOKEN:
-        raise ValueError("GOOGLE_ADS_DEVELOPER_TOKEN environment variable not set")
-
+    if is_demo_mode():
+        return {
+            "Authorization": "Bearer demo-mode",
+            "content-type": "application/json",
+        }
     # Handle different credential types
     if isinstance(creds, service_account.Credentials):
         # For service account, we need to get a new bearer token
@@ -375,9 +459,10 @@ def get_headers(creds):
 
     headers = {
         'Authorization': f'Bearer {token}',
-        'developer-token': GOOGLE_ADS_DEVELOPER_TOKEN,
         'content-type': 'application/json'
     }
+    if GOOGLE_ADS_DEVELOPER_TOKEN:
+        headers['developer-token'] = GOOGLE_ADS_DEVELOPER_TOKEN
 
     if GOOGLE_ADS_LOGIN_CUSTOMER_ID:
         headers['login-customer-id'] = format_customer_id(GOOGLE_ADS_LOGIN_CUSTOMER_ID)
@@ -396,6 +481,15 @@ async def list_accounts() -> str:
     Returns:
         A formatted list of all Google Ads accounts accessible with your credentials
     """
+    if is_demo_mode():
+        entries = [
+            f"Account ID: {cid} — {meta['name']} ({meta['currency_code']}, {meta['time_zone']})"
+            for cid, meta in DEMO_ACCOUNTS.items()
+        ]
+        return "Demo Google Ads accounts (synthetic read-only data):\n" + "\n".join(entries)
+    if MANAGED_PROFILE:
+        entries = [f"Account ID: {cid}" for cid in sorted(get_settings().allowed_customer_ids)]
+        return "Connected Google Ads profile:\n" + "\n".join(entries)
     try:
         creds = get_credentials()
         headers = get_headers(creds)
@@ -1232,9 +1326,11 @@ async def download_image_asset(
         # Validate and sanitize the output directory to prevent path traversal
         try:
             # Get the base directory (current working directory)
-            base_dir = Path.cwd()
+            from agency.config import resolve_worker_file
+
+            base_dir = resolve_worker_file(Path(".")).resolve()
             # Resolve the output directory to an absolute path
-            resolved_output_dir = Path(output_dir).resolve()
+            resolved_output_dir = resolve_worker_file(Path(output_dir)).resolve()
 
             # Ensure the resolved path is within or under the current working directory
             # This prevents path traversal attacks like "../../../etc"
@@ -1655,14 +1751,78 @@ from agency import register_agency_tools
 register_agency_tools(mcp)
 
 
-def main() -> None:
-    """Run the server locally over stdio or remotely over Streamable HTTP."""
+def apply_managed_profile(
+    profile_path: Union[str, Path],
+    credentials: Credentials,
+    *,
+    manager: str = "",
+    api_version: Optional[str] = None,
+) -> None:
+    """Apply managed profile runtime state even if `google_ads_server` was already imported."""
+    global MANAGED_PROFILE, MANAGED_CREDENTIALS
+    global GOOGLE_ADS_LOGIN_CUSTOMER_ID, GOOGLE_ADS_DEVELOPER_TOKEN
+    global GOOGLE_ADS_AUTH_TYPE, GOOGLE_ADS_CREDENTIALS_PATH, GOOGLE_ADS_TOKEN_PATH
+    global API_VERSION
+
+    MANAGED_PROFILE = str(profile_path)
+    with MANAGED_CREDENTIALS_LOCK:
+        MANAGED_CREDENTIALS = credentials
+    GOOGLE_ADS_LOGIN_CUSTOMER_ID = manager or ""
+    GOOGLE_ADS_DEVELOPER_TOKEN = ""
+    GOOGLE_ADS_AUTH_TYPE = "oauth"
+    GOOGLE_ADS_CREDENTIALS_PATH = None
+    GOOGLE_ADS_TOKEN_PATH = None
+    if api_version:
+        API_VERSION = api_version
+
+    # Re-sync agency path bindings if agency modules were imported before env was populated.
+    import agency.analysis_profiles as _ap
+    import agency.audit_retention as _ar
+    import agency.config as _cfg
+    import agency.governance as _gov
+    import agency.locks as _locks
+    import agency.runtime as _rt
+
+    new_cfg_dir = Path(os.environ.get("GOOGLE_ADS_CONFIG_DIR", _cfg.CONFIG_DIR)).expanduser()
+    new_data_dir = Path(os.environ.get("GOOGLE_ADS_DATA_DIR", _cfg.DATA_DIR)).expanduser()
+    _cfg.CONFIG_DIR = new_cfg_dir
+    _cfg.DATA_DIR = new_data_dir
+    _ap.CONFIG_DIR = new_cfg_dir
+    _gov.DATA_DIR = new_data_dir
+    _gov.AUDIT_PATH = new_data_dir / "audit.jsonl"
+    _gov.APPROVAL_PATH = new_data_dir / "pending_approvals.jsonl"
+    _locks.DATA_DIR = new_data_dir
+    _locks.LOCK_ROOT = new_data_dir / "locks"
+    _ar.DATA_DIR = new_data_dir
+    _rt.DATA_DIR = new_data_dir
+
+
+def main(argv: Optional[List[str]] = None) -> None:
+    """Run the server locally over stdio, remotely over Streamable HTTP, or delegate setup subcommands."""
+    import sys
+
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+
+    if raw_args and raw_args[0] == "alerts":
+        from agency.cli_alerts import main as alerts_main
+
+        alerts_main(raw_args[1:])
+        return
+
+    from google_ads_cli import _is_connect_argv
+
+    if _is_connect_argv(raw_args):
+        import google_ads_connect
+
+        google_ads_connect.main(raw_args)
+        return
+
     parser = argparse.ArgumentParser(description="Google Ads MCP server")
     parser.add_argument(
         "--transport",
         choices=("stdio", "streamable-http"),
         default=os.environ.get("MCP_TRANSPORT", "stdio"),
-        help="stdio for Claude Desktop; streamable-http for remote clients",
+        help="stdio for desktop clients; streamable-http for self-hosted remote clients",
     )
     parser.add_argument(
         "--host",
@@ -1675,9 +1835,46 @@ def main() -> None:
         default=int(os.environ.get("PORT", os.environ.get("MCP_PORT", "8000"))),
         help="HTTP bind port (ignored by stdio)",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Run in zero-credential read-only demo mode with realistic synthetic accounts",
+    )
+    parser.add_argument(
+        "--preset",
+        choices=tuple(sorted(PRESETS)),
+        default=os.environ.get("GOOGLE_ADS_PRESET") or None,
+        help="Preset bundle of tool modules (core, leads, ecommerce, agency, full)",
+    )
+    parser.add_argument(
+        "--modules",
+        default=os.environ.get("GOOGLE_ADS_MODULES") or None,
+        help="Comma-separated tool modules to load (e.g. core,measurement,search)",
+    )
+    args = parser.parse_args(raw_args)
+
+    if args.demo:
+        os.environ["GOOGLE_ADS_DEMO_MODE"] = "true"
+        os.environ["READ_ONLY_MODE"] = "true"
+        os.environ["ALLOWED_CUSTOMER_IDS"] = ",".join(DEMO_CUSTOMER_IDS)
+        logger.info("Starting Google Ads MCP server in --demo mode (read-only synthetic data)")
+
+    configure_tool_catalog(mcp, modules=args.modules, preset=args.preset)
 
     if args.transport == "streamable-http":
+        loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+        allow_remote = os.environ.get("MCP_HTTP_ALLOW_REMOTE", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if args.host not in loopback_hosts and not allow_remote:
+            raise SystemExit(
+                f"Refusing to bind Streamable HTTP on non-loopback host '{args.host}' without "
+                "explicit remote protection. Use --host 127.0.0.1 locally, or place an authenticated "
+                "HTTPS reverse proxy (with Origin validation) in front and set MCP_HTTP_ALLOW_REMOTE=true."
+            )
         mcp.settings.host = args.host
         mcp.settings.port = args.port
         logger.info("Starting Streamable HTTP MCP server at http://%s:%s/mcp", args.host, args.port)

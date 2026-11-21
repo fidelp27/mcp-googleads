@@ -254,12 +254,12 @@ def test_chunks_splits_into_size_batches():
 
 def test_user_list_resource_composed_correctly():
     assert (
-        cm._user_list_resource("5461642152", "999")
-        == "customers/5461642152/userLists/999"
+        cm._user_list_resource("1234567890", "999")
+        == "customers/1234567890/userLists/999"
     )
 
 
 @pytest.mark.parametrize("bad", ["", "abc", "0", "-3"])
 def test_user_list_resource_rejects_bad_ids(bad):
     with pytest.raises(ValueError):
-        cm._user_list_resource("5461642152", bad)
+        cm._user_list_resource("1234567890", bad)

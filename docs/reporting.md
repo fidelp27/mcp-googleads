@@ -26,7 +26,7 @@ Cuando la query corre OK pero no hay auction insight rows (poco volumen, filtro 
 ### Ejemplo
 
 ```text
-get_auction_insights(customer_id="5461642152", days=30, level="campaign")
+get_auction_insights(customer_id="1234567890", days=30, level="campaign")
 ```
 
 Con token restringido devuelve `METRIC_ACCESS_DENIED` estructurado. Con token con acceso, devuelve por campaña la lista de competidores con impression share promedio y flags cuando somos outranked.
@@ -66,10 +66,10 @@ Ejecutar antes de tocar bids o pedir un aumento de presupuesto: si la pérdida e
 | `ALL_HEALTHY` | 100% healthy. |
 | `NO_UNITS` | Filtro no devolvió unidades. |
 
-### Ejemplo (Clariola)
+### Ejemplo
 
 ```text
-get_impression_share_losses(customer_id="5461642152", days=30, level="campaign")
+get_impression_share_losses(customer_id="1234567890", days=30, level="campaign")
 ```
 
 Devuelve 2 unidades, 1 rank_limited (87.5% pérdida a rank en la campaña activa) + 1 not_serving.
@@ -88,7 +88,7 @@ Se setea con el tool `update_campaign`:
 update_campaign(customer_id, campaign_id, updates={"final_url_suffix": "<suffix>"})
 ```
 
-Suffix aplicado a la campaña de Clariola:
+Ejemplo de suffix aplicado a una campaña:
 
 ```
 utm_source=google&utm_medium=cpc&utm_campaign={campaignid}&utm_content={adgroupid}&utm_term={keyword}&utm_creative={creative}&utm_matchtype={matchtype}&utm_network={network}&utm_device={device}&utm_geo={loc_physical_ms}
@@ -147,13 +147,13 @@ Devuelve: `id, name, canonical_name, country_code, target_type, status`.
 
 ```bash
 # IDs sueltos
-python scripts/resolve_ads.py --customer-id 5461642152 \
-    --adgroups 199327068917 --ads 821049505825
+python scripts/resolve_ads.py --customer-id 1234567890 \
+    --adgroups 333333333333 --ads 444444444444
 
 # Desde un export, resolviendo ambas columnas -> dos CSV
-python scripts/resolve_ads.py --customer-id 5461642152 \
+python scripts/resolve_ads.py --customer-id 1234567890 \
     --file reporte.csv --adgroup-column utm_content --ad-column utm_creative \
-    --out-prefix output/clariola
+    --out-prefix output/demo
 ```
 
 Genera:
@@ -161,8 +161,8 @@ Genera:
 - `<prefix>_ads.csv`: `ad_id, ad_type, ad_status, ad_group_id, ad_group_name, campaign_name, first_headline`
 
 > **`--customer-id` es la cuenta CLIENTE**, no el MCC. Los ad groups y anuncios
-> viven en la cuenta cliente (ej. Clariola `5461642152`); el manager
-> (`7384467839`) no tiene ads y devolvería `NOT_FOUND`.
+> viven en la cuenta cliente (ej. Demo Account `1234567890`); el manager
+> (`9999999999`) no tiene ads y devolvería `NOT_FOUND`.
 
 `utm_campaign={campaignid}` también resuelve con este script (aparece como
 `campaign_id`/`campaign_name` en la salida de ad groups).
@@ -176,13 +176,13 @@ Genera:
 2. **Resolvé** los IDs a nombres:
    ```bash
    python scripts/resolve_geo.py --file reporte.csv --column utm_geo --out output/geo_mapping.csv
-   python scripts/resolve_ads.py --customer-id 5461642152 --file reporte.csv \
-       --adgroup-column utm_content --ad-column utm_creative --out-prefix output/clariola
+   python scripts/resolve_ads.py --customer-id 1234567890 --file reporte.csv \
+       --adgroup-column utm_content --ad-column utm_creative --out-prefix output/demo
    ```
 3. **Uní** (`JOIN`) por ID en tu BI/planilla:
    - `utm_geo` ↔ `geo_mapping.id`
-   - `utm_content` ↔ `clariola_adgroups.ad_group_id`
-   - `utm_creative` ↔ `clariola_ads.ad_id`
+   - `utm_content` ↔ `demo_adgroups.ad_group_id`
+   - `utm_creative` ↔ `demo_ads.ad_id`
 4. Reporte final con ubicación, ad group y anuncio legibles junto a las métricas.
 
 ---
