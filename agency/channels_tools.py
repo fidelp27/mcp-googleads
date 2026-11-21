@@ -1038,16 +1038,28 @@ def register_channel_tools(mcp) -> None:
     @audited_tool
     def analyze_auction_insights_csv(
         csv_path: Annotated[
-            str,
+            Optional[str],
             Field(description="Local path to a Google Ads UI Auction Insights CSV export (EN or ES)"),
-        ],
+        ] = None,
         own_domain_label: Annotated[
             str,
             Field(description="Label representing your own account row (default 'You'; also matches 'Tú')"),
         ] = "You",
+        csv_content: Annotated[
+            Optional[str],
+            Field(description="Inline CSV text pasted directly from Google Ads UI (useful in remote MCP mode)"),
+        ] = None,
     ) -> str:
         """Parse and analyze an Auction Insights CSV exported from Google Ads UI as fallback when API access is restricted."""
         ensure_tool_allowed("analyze_auction_insights_csv")
+        if csv_content is not None and csv_content.strip():
+            if len(csv_content.encode("utf-8")) > 2_000_000:
+                raise ValueError("csv_content exceeds maximum size of 2 MB.")
+            report = parse_auction_insights_csv_text(csv_content, own_domain_label=own_domain_label)
+            report["file"] = "inline_csv"
+            return format_json(report)
+        if not csv_path or not str(csv_path).strip():
+            raise ValueError("Provide either csv_path or csv_content.")
         path = resolve_worker_file(Path(csv_path).expanduser()).resolve()
         if not path.is_file():
             raise ValueError(f"Auction Insights CSV file not found: {path}")

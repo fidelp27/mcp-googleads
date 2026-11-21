@@ -465,3 +465,81 @@ Para mantener el foco y lanzar una v1.0 sólida de escritorio en 12–14 semanas
 
 **Tests añadidos:**
 - `test_truncated_conversion_actions_suppresses_smart_bidding_without_effective_actions` y `test_truncated_billing_setup_suppresses_no_approved_billing_confirmed_cause` en [`tests/test_audit_fixes.py`](../tests/test_audit_fixes.py) (cada uno validando tanto el caso truncado degradado a `insufficient_data` como el caso control completo).
+
+### 2026-11-21 — Hosted Beta Self-Serve (Opción 2: onboarding web OAuth + cifrado Fernet + pool dinámico de workers + presets remotos)
+
+**Estado:** Implementado y verificado (**`560 passed in 36.46s`**; 10 pruebas remotas en `test_remote_gateway.py` + `test_remote_self_serve.py`).
+
+1. **Almacén cifrado de tenants y pool dinámico bajo demanda (`agency/remote_store.py`)**
+   - **Qué se hizo:** Se implementó `EncryptedProfileStore` sobre SQLite + cifrado Fernet (`MCP_REMOTE_MASTER_KEY`), garantizando que ningún `refresh_token` se guarde en texto plano ni en `tenants.db` ni en el `profile.json` efímero de cada worker (`format: "fernet-v1"`, descifrado solo en memoria por `google_ads_connect.serve()`). Se creó `DynamicWorkerPool` con spawn perezoso por `subject` (lock por usuario para evitar duplicados concurrentes), puertos loopback efímeros, evicción por inactividad (`idle_timeout_seconds`), tope LRU (`max_active_workers`) y parada + borrado inmediato al reconfigurar o revocar.
+   - **Por qué:** Elimina la necesidad de provisionar puertos fijos y reiniciar el gateway por cada usuario nuevo, acota la RAM en VPS y evita credenciales en texto plano en disco.
+
+2. **Portal web self-serve OAuth 2.0 + PKCE (`agency/remote_onboarding.py`, `agency/remote_gateway.py`)**
+   - **Qué se hizo:** Se añadieron las rutas `/connect`, `/connect/session` (cookie `HttpOnly; Secure; SameSite=Lax` firmada con Fernet), `/connect/status`, `/connect/google/start` (PKCE `S256` + `state` CSRF ligado al `sub`), `/connect/google/callback` (descubrimiento de cuentas directas y subcuentas MCC), `/connect/configure` (validando que las cuentas pertenezcan al grant y bloqueando escrituras salvo `MCP_REMOTE_ALLOW_USER_WRITES=true`) y `/connect/disconnect` (revocación en Google + borrado en SQLite + parada del worker). Cuando un usuario autenticado llama a `/mcp` sin conectar Google Ads, el gateway responde `403` con `connect_url`.
+   - **Por qué:** Permite que cualquier usuario externo conecte, elija cuentas/preset y revoque su Google Ads desde el navegador sin intervención manual del operador.
+
+3. **Respeto de presets en workers remotos y CSV inline (`google_ads_connect.py`, `agency/channels_tools.py`, `pyproject.toml`, `docs/remote-pilot.md`)**
+   - **Qué se hizo:** `serve(--worker-port)` ahora respeta `--preset`/`--modules` y el preset guardado en el perfil (solo usa `full` por defecto cuando se pasa `--allow-writes` sin preset explícito); `analyze_auction_insights_csv` acepta `csv_content` inline (hasta 2 MB) para usuarios remotos sin acceso al disco del host; se agregó `cryptography>=42.0` a `[project.optional-dependencies].remote`; y se documentó el despliegue self-serve y el checklist de verificación OAuth de Google en `docs/remote-pilot.md`.
+   - **Por qué:** Evita exponer las 142 tools innecesariamente en sesiones remotas y habilita el fallback de Auction Insights también desde clientes remotos.
+
+**Tests añadidos:**
+- [`tests/test_remote_self_serve.py`](../tests/test_remote_self_serve.py): 5 pruebas cubriendo ausencia de tokens en claro en SQLite y disco, ciclo de vida del `DynamicWorkerPool` (concurrencia, LRU, idle timeout, cambio de preset), flujo completo `/connect` → PKCE/CSRF (bloqueando replay cross-user, cuentas no autorizadas y escrituras deshabilitadas) → `/mcp` → `/connect/disconnect`, worker HTTP real en subproceso con perfil Fernet cifrado y preset `ecommerce` respetado (401 sin clave, 0 tools de escritura), y `analyze_auction_insights_csv` con `csv_content` inline.
+
+### 2026-11-21 — Hardening de Hosted Beta Self-Serve (login web sin Bearer copy-paste, rutas MCC por cuenta, reserva atómica de pool e in-flight draining, alineación de escrituras y catálogo)
+
+**Estado:** Los 4 hallazgos de auditoría sobre el modo self-serve quedaron resueltos y probados (**`562 passed in 35.25s`**; 12 pruebas remotas en `test_remote_gateway.py` + `test_remote_self_serve.py`).
+
+1. **Inicio de sesión web sin pedir Bearer token (`agency/remote_gateway.py`, `agency/remote_onboarding.py`)**
+   - **Qué se hizo:** Cuando `/mcp` detecta un usuario autenticado aún no conectado a Google Ads, emite un ticket de un solo uso (10 min, cifrado en `oauth_pending`) y devuelve `connect_url = https://<host>/connect/ticket?t=<ticket>`, que al abrirse en navegador crea automáticamente la cookie `HttpOnly` para ese mismo `sub`. Además se añadió login web OIDC/OAuth + PKCE (`GET /connect/login` + `GET /connect/oidc/callback` con `MCP_REMOTE_PORTAL_CLIENT_ID`) verificado con el mismo `OAuthVerifier`.
+   - **Por qué:** Abrir un enlace desde Claude Desktop o Codex no transfiere el header `Authorization` al navegador; ambos mecanismos eliminan cualquier copy-paste manual de tokens.
+
+2. **Rutas de acceso por cuenta (`customer_routes`) y bloqueo de edición no validada de MCC (`agency/remote_store.py`, `agency/remote_onboarding.py`, `google_ads_connect.py`, `google_ads_server.py`)**
+   - **Qué se hizo:** `tenants.db` guarda ahora `customer_routes_json` (`cid -> "" | mcc_id`), validado par a par contra el grant de Google Ads; editar preferencias sin reautorizar rechaza cualquier cuenta o `manager` nuevo (`403 reconnect_required_for_route_change`); `serve()` traduce `customer_routes` a `GOOGLE_ADS_LOGIN_CUSTOMER_MAP` (sin `GOOGLE_ADS_LOGIN_CUSTOMER_ID` global cuando hay rutas mixtas); y `google_ads_server.py` aplica `_apply_per_customer_login_header()` en `http_get`/`http_post` para todas las tools core.
+   - **Por qué:** Permite mezclar cuentas directas con múltiples MCC en el mismo usuario sin fugas de `login-customer-id` y cierra la escalada de permisos al editar `manager`.
+
+3. **Reserva atómica de capacidad y protección de solicitudes en vuelo (`agency/remote_store.py`, `agency/remote_gateway.py`)**
+   - **Qué se hizo:** `DynamicWorkerPool` reserva plaza en `_reserved_subjects` bajo `_pool_lock` **antes** de spawnear (impidiendo exceder `max_active_workers` bajo altas simultáneas) y rastrea `in_flight` vía `acquire_worker_handle` / `release_worker_handle` durante toda la vida del `StreamingResponse`. La evicción idle/LRU nunca termina workers con `in_flight > 0` (si todo está ocupado responde `HTTP 503 Retry-After: 2`), y `stop_worker` marca `draining=True` esperando drenaje antes de matar el proceso.
+   - **Por qué:** Garantiza el tope de RAM bajo concurrencia y evita cortar escrituras/consultas activas en curso.
+
+4. **Alineación entre `allow_writes` y el catálogo de tools (`agency/remote_onboarding.py`, `google_ads_connect.py`)**
+   - **Qué se hizo:** Cuando `allow_writes=True`, si no se especifica preset se usa `full`; si se elige otro preset (`core`, `leads`, `ecommerce`, `agency`), se incluye automáticamente el módulo `operations`. El portal HTML preselecciona `full` cuando `MCP_REMOTE_ALLOW_USER_WRITES=true` y describe las tools exactas de cada preset.
+   - **Por qué:** Evita guardar `allow_writes=True` con un catálogo que no expone ninguna tool de escritura.
+
+**Tests añadidos:**
+- `test_portal_oidc_login_mixed_mcc_routes_and_write_preset_alignment` y `test_worker_pool_strict_capacity_under_concurrency_and_inflight_protection` en [`tests/test_remote_self_serve.py`](../tests/test_remote_self_serve.py) (reproduciendo exactamente las 2 altas concurrentes con `max_active_workers=1`, protección `in_flight`, ticket 1-clic + OIDC, cuentas directas + 2 MCCs distintos, rechazo `403` de edición de manager y auto-inclusión de `operations`).
+
+### 2026-11-21 — Cierre de seguridad RFC 9700, precedencia de rutas en `runtime.py`, draining estricto y política global de escrituras en runtime
+
+**Estado:** Completado y verificado (**`564 passed in 41.16s`**; 14 pruebas remotas en `test_remote_gateway.py` + `test_remote_self_serve.py`).
+
+1. **Login OIDC ligado al navegador (RFC 9700) y protección de tickets en logs (`agency/remote_onboarding.py`, `agency/remote_gateway.py`, `docs/remote-pilot.md`)**
+   - **Qué se hizo:** `GET /connect/login` emite la cookie `HttpOnly; Secure; SameSite=Lax` cifrada `mcp_oidc_tx` (`state` + `tx_nonce`, `Path=/connect/oidc/callback`) y `GET /connect/oidc/callback` rechaza cualquier callback de otro navegador (`400 oidc_browser_mismatch`) sin consumir el `state` legítimo. Además `/connect/ticket` y `/connect/oidc/callback` responden con `Cache-Control: no-store`, `Pragma: no-cache`, `Referrer-Policy: no-referrer`, y `remote_gateway.main()` desactiva `uvicorn` `access_log` para no registrar `?t=<ticket>` ni `?code=...` en logs (documentando el mismo requisito para el proxy HTTPS).
+
+2. **Precedencia de rutas fijadas en `agency/runtime.py`**
+   - **Qué se hizo:** En `resolve_login_customer_id()`, `GOOGLE_ADS_LOGIN_CUSTOMER_MAP` (rutas autorizadas del perfil) ahora tiene precedencia **por encima** de `_session_login_map`, y `register_login_customer()` no sobrescribe cuentas ya fijadas en `GOOGLE_ADS_LOGIN_CUSTOMER_MAP`.
+   - **Por qué:** Impide que `list_client_accounts()` sobrescriba en memoria una cuenta autorizada como directa con un MCC descubierto dinámicamente.
+
+3. **Draining contabilizado e ininterrumpible + política global de escrituras en el pool (`agency/remote_store.py`, `agency/remote_gateway.py`, `agency/remote_onboarding.py`)**
+   - **Qué se hizo:** `DynamicWorkerPool` mantiene los workers en drenaje dentro de `_draining_workers` (contabilizados en `active_worker_count()` y en `max_active_workers`), nunca mata un worker con `in_flight > 0` al vencer `drain_timeout_seconds` en `stop_worker` (lo termina automáticamente dentro de `release_worker_handle` en cuanto concluye la última solicitud en curso), y aplica `allow_user_writes` en `_effective_tenant()` al arrancar cada worker (forzando solo lectura si el admin desactiva `MCP_REMOTE_ALLOW_USER_WRITES=false`, reflejándolo también en `/connect/status`).
+
+**Tests añadidos:**
+- `test_pinned_direct_route_in_login_customer_map_is_not_overridden_by_session_discovery`, `test_draining_worker_stays_counted_and_finishes_inflight_write_before_termination`, `test_disconnect_while_worker_draining_returns_202_and_defers_google_revocation` (distinción `HTTP 202 disconnecting` vs. `HTTP 200 disconnected` con revocación diferida en `on_drained` hasta concluir la última solicitud en vuelo) y verificación de rechazo cross-browser `oidc_browser_mismatch` + headers `no-store`/`no-referrer` en [`tests/test_remote_self_serve.py`](../tests/test_remote_self_serve.py) (**`565 passed`**).
+
+### 2026-11-21 — Concurrencia de desconexión repetida, reconexión durante drenaje y ventana de revocación en Google
+
+**Estado:** Completado y verificado (**`571 passed`**; 21 pruebas remotas en `test_remote_gateway.py` + `test_remote_self_serve.py`).
+
+1. **Desconexión idempotente durante drenaje y revocación en vuelo (`agency/remote_store.py`, `agency/remote_onboarding.py`)**
+   - **Qué se hizo:** `DynamicWorkerPool` diferencia ahora `_draining_workers` (solicitud en curso), `_finalizing_workers` (worker ya detenido con `on_drained`/revocación Google en curso) y `_pending_revocations` (revocación directa sin worker, registrada sincrónicamente antes del primer `await`). `is_disconnecting(subject)` permanece `True` hasta que terminan tanto el drenaje como la respuesta de `oauth2.googleapis.com/revoke`. Durante toda esa ventana, `/connect/status` mantiene `disconnecting: true` y `revocation_pending: true`, y cualquier reintento de `POST /connect/disconnect` sigue devolviendo `HTTP 202` (`status: "disconnecting"`) en lugar de un `200` prematuro.
+   - **Por qué:** Cierra la carrera entre la terminación del proceso worker y la respuesta HTTP de revocación en Google.
+
+2. **Bloqueo de reconexión y `disconnect_epoch` atómico en SQLite (`BEGIN IMMEDIATE`) (`agency/remote_store.py`, `agency/remote_onboarding.py`)**
+   - **Qué se hizo:** `GET /connect/google/start`, `GET /connect/google/callback` y `POST /connect/configure` devuelven `HTTP 409 Conflict` (`error: "disconnect_in_progress"`, `Retry-After: 2`) mientras `pool.is_disconnecting(subject)` sea `True`. Además, `EncryptedProfileStore` mantiene `subject_disconnect_epochs` en modo WAL y ejecuta todas sus mutaciones (`save_oauth_pending`, `pop_oauth_pending`, `upsert_tenant`, `update_preferences`, `revoke_tenant`) dentro de transacciones explícitas `BEGIN IMMEDIATE` con `busy_timeout = 30000`, adquiriendo el lock de escritura de SQLite **antes** de leer `epoch` y escribir el grant o activar la conexión. Cada flujo `/connect/google/start` captura su `disconnect_epoch`, `google_callback` revalida `is_disconnecting` y `disconnect_epoch` tras `exchange_code`/`discover_accounts`, y tanto guardar el `grant_token` como activar el tenant en `upsert_tenant` validan atómicamente el epoch en SQLite.
+   - **Por qué:** Garantiza atomicidad real incluso entre múltiples instancias o procesos que compartan `tenants.db` (evitando que una instancia lea `epoch=0`, otra desconecte subiendo a `epoch=1`, y la primera logre escribir un grant o activar un tenant obsoleto).
+
+3. **Perfiles efímeros por instancia de worker (`agency/remote_store.py`, `google_ads_connect.py`)**
+   - **Qué se hizo:** Cada worker lanzado por `DynamicWorkerPool` materializa su propio archivo cifrado `profile-<instance_id>.json` (almacenado en `_ManagedWorker.profile_path`) y al finalizar (`_finalize_worker`) elimina exclusivamente ese archivo (`profile_path.unlink(missing_ok=True)`), mientras `wipe_runtime_profile()` excluye siempre las rutas activas/en drenaje/finalizando. En `google_ads_connect.py:serve()`, `dir_prefix` normaliza `profile-*` a `profile` para que `profile-data`, `profile-config` y `profile-files` sigan compartiéndose entre reinicios del mismo usuario.
+   - **Por qué:** Impide que el cierre de un worker antiguo borre el perfil cifrado de un worker nuevo en solapamientos de reconfiguración o pool.
+
+**Tests añadidos:**
+- `test_repeated_disconnect_while_draining_stays_202_and_preserves_profile_until_drained`, `test_reconnect_while_previous_worker_drains_preserves_new_worker_profile`, `test_disconnect_revocation_in_flight_keeps_disconnecting_status_and_blocks_reconnect`, `test_direct_disconnect_revocation_in_flight_without_worker_keeps_disconnecting_and_blocks_reconnect`, `test_inflight_google_oauth_callback_is_rejected_when_disconnect_starts_mid_exchange` y `test_cross_instance_sqlite_disconnect_epoch_is_atomic_for_grant_and_upsert` en [`tests/test_remote_self_serve.py`](../tests/test_remote_self_serve.py).

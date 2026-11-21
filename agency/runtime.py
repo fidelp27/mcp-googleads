@@ -126,12 +126,19 @@ def parse_login_customer_map(raw: str) -> dict[str, str]:
 
 
 def register_login_customer(customer_id: str, manager_id: str | None) -> None:
-    """Remember the manager (or direct='' access) for a customer in the active session."""
+    """Remember the manager (or direct='' access) for a customer in the active session.
+
+    Accounts explicitly pinned in `GOOGLE_ADS_LOGIN_CUSTOMER_MAP` (for example by a
+    validated managed/remote profile) are never overwritten by dynamic discovery.
+    """
     cid = normalize_customer_id(customer_id)
     mgr = normalize_customer_id(manager_id) if manager_id else ""
     ctx = _runtime_context.get()
     if ctx is not None:
         ctx.login_customer_map[cid] = mgr
+        return
+    env_map = parse_login_customer_map(os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_MAP", ""))
+    if cid in env_map:
         return
     with _session_login_map_lock:
         _session_login_map[cid] = mgr
@@ -152,8 +159,8 @@ def resolve_login_customer_id(
     Precedence:
     1. Explicit per-call override (`explicit_login_customer_id`).
     2. Request-scoped `RuntimeContext.login_customer_map` (supports direct='' override).
-    3. Session-discovered map (`register_login_customer`, populated e.g. by MCC discovery).
-    4. `GOOGLE_ADS_LOGIN_CUSTOMER_MAP` env var (`cid:mcc,direct_cid:`).
+    3. `GOOGLE_ADS_LOGIN_CUSTOMER_MAP` env var (`cid:mcc,direct_cid:`) — pinned profile/host routes.
+    4. Session-discovered map (`register_login_customer`, populated e.g. by MCC discovery).
     5. `config/clients.json` per-client `manager_id` / `login_customer_id` ("" = direct).
     6. Fallback to `RuntimeContext.default_login_customer_id` / `GOOGLE_ADS_LOGIN_CUSTOMER_ID`
        (omitted when querying the manager account itself).
@@ -168,14 +175,14 @@ def resolve_login_customer_id(
         mapped = ctx.login_customer_map[cid]
         return mapped or None
 
+    env_map = parse_login_customer_map(os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_MAP", ""))
+    if cid in env_map:
+        return env_map[cid] or None
+
     with _session_login_map_lock:
         if cid in _session_login_map:
             mapped = _session_login_map[cid]
             return mapped or None
-
-    env_map = parse_login_customer_map(os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_MAP", ""))
-    if cid in env_map:
-        return env_map[cid] or None
 
     meta = client_metadata(cid)
     if "manager_id" in meta or "login_customer_id" in meta:

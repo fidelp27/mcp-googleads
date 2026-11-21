@@ -98,8 +98,29 @@ class _DemoResponse:
         return self._payload
 
 
+def _apply_per_customer_login_header(url: str, kwargs: Dict[str, Any]) -> None:
+    """Apply per-account `login-customer-id` routing (or omit for direct accounts) from `GOOGLE_ADS_LOGIN_CUSTOMER_MAP`."""
+    headers = kwargs.get("headers")
+    if not isinstance(headers, dict):
+        return
+    match = re.search(r"/customers/(\d{10})(?:/|$)", url)
+    if not match:
+        return
+    cid = match.group(1)
+    from agency.runtime import resolve_login_customer_id
+
+    resolved = resolve_login_customer_id(cid)
+    updated = dict(headers)
+    if resolved and resolved != cid:
+        updated["login-customer-id"] = format_customer_id(resolved)
+    else:
+        updated.pop("login-customer-id", None)
+    kwargs["headers"] = updated
+
+
 def http_get(url: str, **kwargs):
     """Make a bounded HTTP GET request to avoid hanging MCP tool calls."""
+    _apply_per_customer_login_header(url, kwargs)
     kwargs.setdefault("timeout", HTTP_TIMEOUT_SECONDS)
     return requests.get(url, **kwargs)
 
@@ -112,6 +133,7 @@ def http_post(url: str, **kwargs):
             cid = match.group(1)
             query = (kwargs.get("json") or {}).get("query", "")
             return _DemoResponse(200, {"results": demo_search(cid, query)})
+    _apply_per_customer_login_header(url, kwargs)
     kwargs.setdefault("timeout", HTTP_TIMEOUT_SECONDS)
     return requests.post(url, **kwargs)
 

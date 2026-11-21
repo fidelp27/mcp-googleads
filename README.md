@@ -391,7 +391,9 @@ google-ads-mcp-server alerts --demo --profile leads-audit --format json
 ## Client Compatibility & Self-Hosted HTTP
 
 - **Desktop `stdio` (primary v1.0 path):** Config generation and `stdio` MCP handshakes are automated for Claude Desktop, Claude Code, Codex, Antigravity, Gemini CLI, and generic desktop hosts (Cursor, VS Code, Cherry Studio, Cline, Kimi CLI). Desktop `.mcpb` bundling is **planned** (not yet built). See [Compatibility Matrix](docs/compatibility-matrix.md) for verified status per client, channel coverage, API boundaries, and per-family write guarantees.
-- **Self-hosted `Streamable HTTP` (advanced):** Single-tenant per process (`--transport streamable-http` or Docker). Always place an authenticated HTTPS reverse proxy (with `Origin` validation) in front before setting `MCP_HTTP_ALLOW_REMOTE=true`. Multi-tenant remote OAuth 2.1 (for ChatGPT web / Claude.ai web) is planned post-v1.0.
+- **Self-hosted Remote & Hosted Beta (`Streamable HTTP` + OAuth):**
+  - Single-user self-hosted mode via `google-ads-mcp-server --transport streamable-http` (loopback-only unless `MCP_HTTP_ALLOW_REMOTE=true` behind an authenticated HTTPS proxy).
+  - Multi-user OAuth gateway via `google-ads-mcp-server remote` supporting both static managed pilots (`MCP_REMOTE_WORKERS`) and **self-serve hosted onboarding** (`/connect` Google OAuth + PKCE, Fernet-encrypted SQLite profile store, lazy-spawning idle-evicting worker pool, per-user presets, and 1-click token revocation). See [Remote Pilot & Self-Serve Guide](docs/remote-pilot.md).
 
 ---
 

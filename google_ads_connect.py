@@ -693,24 +693,60 @@ def serve(
 ) -> None:
     if allow_writes and worker_port is None:
         raise ValueError("--allow-writes requires --worker-port.")
-    config = json.loads(profile.read_text(encoding="utf-8"))
+    raw_config = json.loads(profile.read_text(encoding="utf-8"))
+    if isinstance(raw_config, dict) and "encrypted" in raw_config:
+        from agency.remote_store import decrypt_profile_payload
+
+        config = decrypt_profile_payload(raw_config)
+    else:
+        config = raw_config
     targets = _profile_customers(config)
     if not targets:
         raise ValueError("Profile does not include any Google Ads customer ID.")
-    manager = customer_id(config["manager"]) if config.get("manager") else ""
+    legacy_manager = customer_id(config["manager"]) if config.get("manager") else ""
+    raw_routes = config.get("customer_routes")
+    if isinstance(raw_routes, dict) and raw_routes:
+        customer_routes = {
+            customer_id(str(k)): (customer_id(str(v)) if str(v or "").strip() else "")
+            for k, v in raw_routes.items()
+        }
+        targets = list(dict.fromkeys([*targets, *customer_routes.keys()]))
+    else:
+        customer_routes = {cid: legacy_manager for cid in targets}
+
+    unique_managers = sorted({mgr for mgr in customer_routes.values() if mgr})
+    # Only set global login-customer-id when ALL accounts use the same single MCC (no direct accounts mixed in)
+    manager = (
+        unique_managers[0]
+        if len(unique_managers) == 1 and all(bool(m) for m in customer_routes.values())
+        else ""
+    )
+    login_customer_map_env = ",".join(f"{cid}:{mgr}" for cid, mgr in customer_routes.items())
+
     effective_preset = preset if preset is not None else config.get("preset")
     effective_modules = modules if modules is not None else config.get("modules")
     clean_preset, clean_modules = _validate_catalog_selection(effective_preset, effective_modules)
+    # Per-instance remote worker profiles (`profile-<instance_id>.json`) share the tenant's
+    # persistent `profile-files`, `profile-data`, and `profile-config` directories.
+    dir_prefix = "profile" if profile.stem.startswith("profile-") else profile.stem
     if worker_port is not None:
         if not 1 <= worker_port <= 65535:
             raise ValueError("--worker-port must be between 1 and 65535.")
         from agency.remote_gateway import require_worker_key
 
         worker_key = require_worker_key()
-        os.environ["MCP_REMOTE_FILES_DIR"] = str(profile.parent / (profile.stem + "-files"))
+        os.environ["MCP_REMOTE_FILES_DIR"] = str(profile.parent / (dir_prefix + "-files"))
         os.environ["GOOGLE_ADS_DEMO_MODE"] = "false"
-        clean_preset = "full"
-        clean_modules = None
+        # Respect explicit preset/modules; default to 'full' when --allow-writes is set with no preset,
+        # and auto-include 'operations' if --allow-writes is combined with a non-'full' preset.
+        if allow_writes:
+            if not clean_preset and not clean_modules:
+                clean_preset = "full"
+            elif clean_preset != "full":
+                mod_items = [p.strip().lower() for p in (clean_modules or "").split(",") if p.strip()]
+                if "operations" not in mod_items:
+                    mod_items.append("operations")
+                clean_modules = ",".join(mod_items)
     read_only = not allow_writes
     # Select the profile before importing modules that read configuration at import time.
     os.environ.pop("GOOGLE_ADS_CREDENTIALS_PATH", None)
@@ -721,13 +757,14 @@ def serve(
             "GOOGLE_ADS_AUTH_TYPE": "oauth",
             "GOOGLE_ADS_API_VERSION": API_VERSION,
             "GOOGLE_ADS_LOGIN_CUSTOMER_ID": manager,
+            "GOOGLE_ADS_LOGIN_CUSTOMER_MAP": login_customer_map_env,
             "GOOGLE_ADS_DEVELOPER_TOKEN": "",
-            "GOOGLE_ADS_DATA_DIR": str(profile.parent / (profile.stem + "-data")),
-            "GOOGLE_ADS_CONFIG_DIR": str(profile.parent / (profile.stem + "-config")),
+            "GOOGLE_ADS_DATA_DIR": str(profile.parent / (dir_prefix + "-data")),
+            "GOOGLE_ADS_CONFIG_DIR": str(profile.parent / (dir_prefix + "-config")),
             "GOOGLE_ADS_PRESET": clean_preset or "",
             "GOOGLE_ADS_MODULES": clean_modules or "",
             "READ_ONLY_MODE": "true" if read_only else "false",
-            "ALLOWED_CUSTOMER_IDS": ",".join(dict.fromkeys(filter(None, (*targets, manager)))),
+            "ALLOWED_CUSTOMER_IDS": ",".join(dict.fromkeys(filter(None, (*targets, *unique_managers)))),
         }
     )
     import google_ads_server
