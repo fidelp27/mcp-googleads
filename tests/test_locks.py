@@ -101,42 +101,17 @@ def test_second_call_times_out_when_first_holds(isolated_lock_root):
 
 
 def test_different_customers_do_not_block_each_other(isolated_lock_root):
-    hits: list[str] = []
-
-    def worker(customer_id: str):
-        with locks.resource_lock(customer_id, "customers/x/campaigns/1", timeout_seconds=1):
-            hits.append(customer_id)
-            time.sleep(0.1)
-
-    t1 = threading.Thread(target=worker, args=("1234567890",))
-    t2 = threading.Thread(target=worker, args=("9876543210",))
-    start = time.monotonic()
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-    elapsed = time.monotonic() - start
-    # Should be roughly the max hold time, not sum, because customers differ
-    assert elapsed < 0.25
+    resource = "customers/x/campaigns/1"
+    with locks.resource_lock("1234567890", resource, timeout_seconds=0) as first:
+        with locks.resource_lock("9876543210", resource, timeout_seconds=0) as second:
+            assert first["lock_path"] != second["lock_path"]
 
 
 def test_different_resources_same_customer_do_not_block(isolated_lock_root):
-    hits: list[str] = []
-
-    def worker(resource: str):
-        with locks.resource_lock("1234567890", resource, timeout_seconds=1):
-            hits.append(resource)
-            time.sleep(0.1)
-
-    t1 = threading.Thread(target=worker, args=("customers/x/campaigns/1",))
-    t2 = threading.Thread(target=worker, args=("customers/x/campaigns/2",))
-    start = time.monotonic()
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-    elapsed = time.monotonic() - start
-    assert elapsed < 0.25
+    customer_id = "1234567890"
+    with locks.resource_lock(customer_id, "customers/x/campaigns/1", timeout_seconds=0) as first:
+        with locks.resource_lock(customer_id, "customers/x/campaigns/2", timeout_seconds=0) as second:
+            assert first["lock_path"] != second["lock_path"]
 
 
 # ---------- validation ----------
