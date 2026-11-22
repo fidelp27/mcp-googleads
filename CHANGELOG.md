@@ -4,6 +4,40 @@ All notable changes to `google-ads-mcp-server` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-11-22
+
+Docs and surface-area cleanup. No behavior changes to tools or
+reporting.
+
+### Removed
+
+- The `agency://docs/{domain}` MCP resource. It read Markdown files
+  from the project's `docs/` directory, which is not shipped in the
+  wheel, so the resource only ever worked from a git checkout. The
+  `agency://tools/{tool_name}` resource (with its workflow / safety
+  guidance per tool) stays.
+- 15 reference docs that were not linked from the README
+  (`agency-playbook`, `audiences-assets`, `campaigns`, `client-facing`,
+  `conversions-recommendations`, `demand-gen`, `experiments`,
+  `gaql-google-ads-query-language`, `great-gaql-samples`,
+  `keyword-planner`, `keywords`, `offline-conversions`, `reporting`,
+  `reporting-mcc`, `roadmap-marketing`).
+
+### Changed
+
+- `agency/resources.py`: `_tool_domain` now returns a small set of
+  domain labels (`guardrails`, `campaigns`, `search`,
+  `audiences-assets`, `measurement`, `reporting`, `agency`) used purely
+  as informational tags on `agency://tools/{tool_name}` responses.
+- README: removed the stale `agency://docs/{domain}` row from the MCP
+  Resources table.
+- `docs/connect.md` rewritten as a full step-by-step credentials guide
+  — Google Cloud project, Google Ads API enablement, OAuth consent
+  screen, Desktop OAuth client, developer-token access levels (Test /
+  Basic / Standard), `connect` for direct / multi-account / MCC,
+  `doctor` verification, common-error troubleshooting, and secret
+  storage layout.
+
 ## [0.2.1] - 2026-11-22
 
 Documentation and hygiene release. 0.2.0 was yanked on PyPI in favor of
