@@ -4,6 +4,26 @@ All notable changes to `google-ads-mcp-server` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-11-22
+
+Documentation and hygiene release. 0.2.0 was yanked on PyPI in favor of
+this version (same feature set).
+
+### Changed
+
+- **README** reorganized: installation moved to Section 1 (`uvx` /
+  `pipx` / `pip` + demo, `connect` for real accounts, manual
+  `claude_desktop_config.json`, and `doctor`), followed by a
+  consolidated feature summary and the full 142-tool catalog with
+  stable section anchors.
+- Added PyPI / Python / License badges.
+
+### Fixed
+
+- `tests/test_audit_fixes.py` no longer references a real client
+  filename when asserting `.dockerignore` coverage; the glob
+  `analisis-*.md` is now validated with a generic example.
+
 ## [0.2.0] - 2026-11-22
 
 First public PyPI release. Major expansion of the modular catalog, governance,
