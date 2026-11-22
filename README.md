@@ -15,10 +15,10 @@ Ships **142 structured tools** across **10 modular domains** with **5 one-word p
 1. [Install](#1-install)
    - [A. Zero-credential demo (30 seconds)](#a-zero-credential-demo-30-seconds)
    - [B. Connect a real Google Ads account](#b-connect-a-real-google-ads-account)
-   - [C. Manual `claude_desktop_config.json` (fallback)](#c-manual-claude_desktop_configjson-fallback)
+   - [C. Manual client configuration](#c-manual-client-configuration)
    - [D. Verify everything (`doctor`)](#d-verify-everything-doctor)
 2. [What You Get (Feature Summary)](#2-what-you-get-feature-summary)
-3. [Tool Catalog & Presets](#3-tool-catalog--presets)
+3. [Tool Catalog & Presets](#3-tool-catalog--presets---preset----modules)
 4. [Complete Tool Reference (All 142 Tools)](#4-complete-tool-reference-all-142-tools)
    - [4.1 `core` Module (25 tools — loaded by default)](#41-core-module-25-tools--loaded-by-default)
    - [4.2 `diagnostics` Module (5 tools)](#42-diagnostics-module-5-tools)
@@ -41,24 +41,18 @@ Ships **142 structured tools** across **10 modular domains** with **5 one-word p
 
 ## 1. Install
 
-**Requirements:** Python ≥ 3.11 and either [`uv`](https://docs.astral.sh/uv/) (recommended) or `pipx`/`pip`.
+Install from [PyPI](https://pypi.org/project/google-ads-mcp-server/) with [`uv`](https://docs.astral.sh/uv/getting-started/installation/). The package requires Python 3.11 or later. `uv` can install the Python version requested here.
 
-```bash
-# Option 1 — no install, auto-fetched on every run (recommended for desktop clients)
-uvx google-ads-mcp-server --help
-
-# Option 2 — isolated install
-pipx install google-ads-mcp-server
-
-# Option 3 — plain pip
-pip install google-ads-mcp-server
+```sh
+uv tool install --python 3.12 google-ads-mcp-server
+uv tool update-shell
 ```
 
-Pick **one** of the three setup paths below (A, B, or C) depending on whether you want a demo, an automated real-account connection, or manual control over `claude_desktop_config.json`.
+Open a new terminal if the command is not on `PATH`. If you already use `pipx`, `pipx install google-ads-mcp-server` is another way to install it. The single-line commands below work in PowerShell and in macOS/Linux shells.
 
 ### A. Zero-credential demo (30 seconds)
 
-No Google Cloud project, no OAuth, no developer token. Just synthetic accounts (`1111111111` EUR ecommerce + `2222222222` USD leads) you can audit, report on, and diagnose end-to-end.
+Try audits and reports with synthetic accounts (`1111111111` EUR ecommerce and `2222222222` USD leads). This mode requires only the package and an MCP client.
 
 ```bash
 # Register demo mode in your desktop AI client of choice
@@ -74,7 +68,7 @@ Or launch directly over `stdio` without registering:
 google-ads-mcp-server --transport stdio --demo --preset ecommerce
 ```
 
-Then in Claude Desktop (or any supported client), try:
+Restart the client after registration. Then try one of these examples:
 - *"List my accessible accounts and build a multi-currency agency dashboard."*
 - *"Load the `leads-audit` analysis profile and audit account `2222222222`."*
 - *"Diagnose delivery issues, budget pacing, and wasted search terms on account `1111111111`."*
@@ -82,98 +76,40 @@ Then in Claude Desktop (or any supported client), try:
 
 ### B. Connect a real Google Ads account
 
-1. Enable the **Google Ads API** in a Google Cloud project and download a **Desktop app** OAuth client JSON. Get a **developer token** from your MCC. ([detailed setup guide](docs/connect.md)).
-2. Run `connect` — it opens the browser, saves an encrypted profile under `~/.google-ads/`, wires the chosen desktop AI client's config, and locks `READ_ONLY_MODE=true` by default.
+1. Enable the **Google Ads API** in your own Google Cloud project. For live accounts, request [Explorer access or higher](https://developers.google.com/google-ads/api/docs/api-policy/access-levels#explorer_access_level) for that project.
+2. In **Google Auth Platform → Data Access**, add `https://www.googleapis.com/auth/adwords`. Under **Clients**, create a **Desktop app** OAuth client and download its JSON. For an external app in **Testing**, add the Google account that will authorize as a test user. The Ads authorization in that mode expires after seven days. See the [detailed setup guide](docs/connect.md).
+3. Run `connect`, paste the path to your downloaded JSON when prompted, and authorize with the Google account that can access the Ads account or MCC. The CLI validates access, saves a local profile, and registers your selected client in read-only mode.
 
 ```bash
-# Direct account with the compact 25-tool `core` catalog
-google-ads-mcp-server connect --client claude-desktop --customer 1234567890 \
-    --oauth-client /path/to/client_secret.json
+# Direct account. Replace the example customer ID with yours.
+google-ads-mcp-server connect --client claude-desktop --customer 1234567890
 
-# Direct account with ecommerce depth (PMax, Shopping, Measurement, Diagnostics)
-google-ads-mcp-server connect --client codex --customer 1234567890 --preset ecommerce \
-    --oauth-client /path/to/client_secret.json
-
-# MCC: automatically scope every enabled child account, with dynamic per-account login-customer-id routing
-google-ads-mcp-server connect --client antigravity --manager 9999999999 --all-mcc-clients --preset agency \
-    --oauth-client /path/to/client_secret.json
-
-# Reuse a saved profile in another client (no new OAuth round-trip)
-google-ads-mcp-server register --client gemini-cli --preset leads
+# Alternatively, connect all enabled non-manager accounts under your MCC.
+google-ads-mcp-server connect --client claude-desktop --manager 9999999999 --all-mcc-clients --preset agency
 ```
 
-Supported `--client` targets: `claude-desktop`, `claude-code`, `codex`, `antigravity`, `gemini-cli`, `generic` (emits the standard `{"mcpServers": ...}` JSON for Cursor, VS Code, Cherry Studio, Cline, Kimi CLI, etc.).
+Use `--oauth-client "path/to/client_secret.json"` to pass the JSON path directly. Omit `--customer` for interactive account selection when more than one account is available. To connect just one account under an MCC, pass both `--manager` and `--customer`.
 
-Managed profiles **always** launch with `READ_ONLY_MODE=true` and scope access strictly to the authorized customer IDs (plus the manager ID when configured).
+For a different client, change `--client` on `connect`, or register the existing profile after connecting once:
 
-### C. Manual `claude_desktop_config.json` (fallback)
-
-If you prefer to edit `claude_desktop_config.json` by hand instead of using `connect` / `register`, open it from Claude Desktop → *Settings → Developer → Edit Config* and paste a block like this under `mcpServers` (edit paths and IDs):
-
-**Windows**
-
-```json
-{
-  "mcpServers": {
-    "google-ads": {
-      "command": "uvx",
-      "args": ["google-ads-mcp-server", "--transport", "stdio", "--preset", "core"],
-      "env": {
-        "GOOGLE_ADS_AUTH_TYPE": "oauth",
-        "GOOGLE_ADS_CLIENT_ID": "YOUR_OAUTH_CLIENT_ID",
-        "GOOGLE_ADS_CLIENT_SECRET": "YOUR_OAUTH_CLIENT_SECRET",
-        "GOOGLE_ADS_TOKEN_PATH": "C:\\Users\\YOU\\.google-ads\\token.json",
-        "GOOGLE_ADS_DEVELOPER_TOKEN": "YOUR_DEVELOPER_TOKEN",
-        "GOOGLE_ADS_LOGIN_CUSTOMER_ID": "1234567890",
-        "ALLOWED_CUSTOMER_IDS": "1234567890,0987654321",
-        "READ_ONLY_MODE": "true",
-        "OPERATOR_NAME": "you"
-      }
-    }
-  }
-}
+```sh
+google-ads-mcp-server register --client codex
+google-ads-mcp-server register --client claude-code
 ```
 
-**macOS / Linux**
+Supported values are `claude-desktop` (Windows/macOS), `claude-code` (requires `claude` on `PATH`), `codex` (local CLI, desktop, or IDE), `antigravity`, `gemini-cli`, and `generic`. For Antigravity with package version 0.2.2, see the [config path workaround](docs/connect.md#antigravity-con-la-versión-022). If you registered the demo in the same client, remove its `google_ads_mcp` entry before registering the real account.
 
-```json
-{
-  "mcpServers": {
-    "google-ads": {
-      "command": "uvx",
-      "args": ["google-ads-mcp-server", "--transport", "stdio", "--preset", "core"],
-      "env": {
-        "GOOGLE_ADS_AUTH_TYPE": "oauth",
-        "GOOGLE_ADS_CLIENT_ID": "YOUR_OAUTH_CLIENT_ID",
-        "GOOGLE_ADS_CLIENT_SECRET": "YOUR_OAUTH_CLIENT_SECRET",
-        "GOOGLE_ADS_TOKEN_PATH": "/Users/you/.google-ads/token.json",
-        "GOOGLE_ADS_DEVELOPER_TOKEN": "YOUR_DEVELOPER_TOKEN",
-        "GOOGLE_ADS_LOGIN_CUSTOMER_ID": "1234567890",
-        "ALLOWED_CUSTOMER_IDS": "1234567890,0987654321",
-        "READ_ONLY_MODE": "true",
-        "OPERATOR_NAME": "you"
-      }
-    }
-  }
-}
+Restart your client and ask it to use the Google Ads MCP to list accounts or report campaign performance for the last seven days. The [local profile](docs/connect.md#dónde-se-guarda-cada-cosa) contains a refresh token. Keep it private.
+
+### C. Manual client configuration
+
+For a client that supports local `stdio` servers, generate its configuration from your existing profile:
+
+```sh
+google-ads-mcp-server register --client generic
 ```
 
-`uvx` auto-installs the package on first run (requires [`uv`](https://docs.astral.sh/uv/)). If you prefer pipx: replace `"command": "uvx"` with `"command": "google-ads-mcp-server"` and drop `google-ads-mcp-server` from `args`, after `pipx install google-ads-mcp-server`.
-
-**Zero-credential demo** (no Google Cloud project needed):
-
-```json
-{
-  "mcpServers": {
-    "google-ads-demo": {
-      "command": "uvx",
-      "args": ["google-ads-mcp-server", "--transport", "stdio", "--demo", "--preset", "ecommerce"]
-    }
-  }
-}
-```
-
-After editing, fully quit and reopen Claude Desktop so it picks up the new server.
+Copy the generated `google_ads_mcp` entry into your client's configuration using its schema. In Claude Desktop, merge it into `mcpServers` in **Settings → Developer → Edit Config**. For the demo configuration, add `--demo` to `register --client generic`. Restart the client after editing.
 
 ### D. Verify everything (`doctor`)
 
@@ -309,7 +245,7 @@ Included in `leads`, `agency`, and `full` presets.
 | `get_keyword_performance` | Keyword metrics (`keyword_view`) with match type, Quality Score, and all **3 Quality Score subcomponents** (`creative_quality_score`, `post_click_quality_score`, `search_predicted_ctr`). |
 | `get_impression_share_losses` | Campaign Search Impression Share, exact-match IS, and IS lost to budget vs. rank. |
 | `get_ad_strength_diagnostics` | Audits Responsive Search Ad strength (`POOR`/`AVERAGE`/`GOOD`/`EXCELLENT`), policy approvals, and pinning. |
-| `get_auction_insights` | Queries API `auction_insight_*` metrics when permitted by the developer token / Cloud project. |
+| `get_auction_insights` | Queries API `auction_insight_*` metrics when available to the Cloud project. |
 | `analyze_auction_insights_csv` | Parses Google Ads UI Auction Insights CSV exports (**English and Spanish**) into competitor rankings and high-pressure overlap alerts whenever the API restricts `auction_insight_*`. |
 | `get_shared_sets` | Lists shared negative keyword lists and campaign attachments. |
 | `analyze_search_terms_clusters` | Groups search terms into n-gram clusters with aggregate spend, clicks, CTR, conversions, and CPA. |
@@ -495,8 +431,9 @@ google-ads-mcp-server alerts --demo --profile leads-audit --format json
 
 ## 9. Client Compatibility & Self-Hosted HTTP
 
-- **Desktop `stdio` (primary v1.0 path):** Config generation and `stdio` MCP handshakes are automated for Claude Desktop, Claude Code, Codex, Antigravity, Gemini CLI, and generic desktop hosts (Cursor, VS Code, Cherry Studio, Cline, Kimi CLI). Desktop `.mcpb` bundling is **planned** (not yet built). See [Compatibility Matrix](docs/compatibility-matrix.md) for verified status per client, channel coverage, API boundaries, and per-family write guarantees.
-- **Self-hosted Remote & Hosted Beta (`Streamable HTTP` + OAuth):**
+- **Local `stdio`:** Use `connect` or `register` for Claude Desktop, Claude Code, local Codex, Antigravity, and Gemini CLI. For other `stdio` hosts, use the generated configuration from `--client generic`. See the [compatibility matrix](docs/compatibility-matrix.md).
+- **ChatGPT in the browser:** Set up a separate remote MCP connection using an HTTPS endpoint or Secure MCP Tunnel in a supported account or workspace. See [OpenAI's custom MCP setup](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt).
+- **Self-hosted remote pilot (`Streamable HTTP` + OAuth):**
   - Single-user self-hosted mode via `google-ads-mcp-server --transport streamable-http` (loopback-only unless `MCP_HTTP_ALLOW_REMOTE=true` behind an authenticated HTTPS proxy).
   - Multi-user OAuth gateway via `google-ads-mcp-server remote` supporting both static managed pilots (`MCP_REMOTE_WORKERS`) and **self-serve hosted onboarding** (`/connect` Google OAuth + PKCE, Fernet-encrypted SQLite profile store, lazy-spawning idle-evicting worker pool, per-user presets, and 1-click token revocation). See [Remote Pilot & Self-Serve Guide](docs/remote-pilot.md).
 

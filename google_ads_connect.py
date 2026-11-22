@@ -381,7 +381,7 @@ def register_client(
             raise ValueError("Use --client generic to get the stdio configuration for your desktop client.")
         _register_json_mcp_servers(root / "claude_desktop_config.json", entry)
     elif client == "antigravity":
-        root = Path(os.getenv("ANTIGRAVITY_CONFIG_DIR", Path.home() / ".gemini/antigravity"))
+        root = Path(os.getenv("ANTIGRAVITY_CONFIG_DIR", Path.home() / ".gemini/config"))
         _register_json_mcp_servers(root / "mcp_config.json", entry)
     elif client == "gemini-cli":
         root = Path(os.getenv("GEMINI_HOME", Path.home() / ".gemini"))

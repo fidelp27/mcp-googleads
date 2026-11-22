@@ -8,10 +8,10 @@ This document declares verified desktop MCP clients, domain modules, channel cov
 
 | Ecosystem / Model | Client | Transport (v1.0) | Registration (`--client`) | Status | Notes |
 | --- | --- | --- | --- | --- | --- |
-| **Anthropic (Claude)** | Claude Desktop (Windows / macOS) | `stdio` | `claude-desktop` | Primary (config verified; desktop UI E2E pending) | Supports MCP prompts (`analysis_profile_prompt`), resources, and `--preset` / `--modules` via `connect` / `register`. `.mcpb` desktop bundle is **planned** (not yet built). |
+| **Anthropic (Claude)** | Claude Desktop (Windows / macOS) | `stdio` | `claude-desktop` | Primary (config verified; desktop UI E2E pending) | Supports MCP prompts (`analysis_profile_prompt`), resources, and `--preset` / `--modules` via `connect` / `register`. |
 | **Anthropic (Claude)** | Claude Code | `stdio` | `claude-code` | Primary (config verified) | Registers via `claude mcp add-json --scope user` (supports `--preset` / `--modules`). |
 | **OpenAI** | Codex (CLI / Desktop / IDE) | `stdio` | `codex` | Primary (config verified) | Appends `[mcp_servers.google_ads_mcp]` to `~/.codex/config.toml` (supports `--preset` / `--modules`). |
-| **Google (Gemini)** | Antigravity | `stdio` | `antigravity` | Primary (config verified) | Writes `~/.gemini/antigravity/mcp_config.json`; all read schemas pass strict flat-object linter. |
+| **Google (Gemini)** | Antigravity | `stdio` | `antigravity` | Primary (config verified) | Writes `~/.gemini/config/mcp_config.json`; all read schemas pass strict flat-object linter. |
 | **Google (Gemini)** | Gemini CLI | `stdio` | `gemini-cli` | Primary (config verified) | Writes `~/.gemini/settings.json`. |
 | **DeepSeek** | Desktop MCP hosts (Cherry Studio, Cline, Roo Code) configured with DeepSeek API | `stdio` | `generic` | Supported | DeepSeek API performs tool calling; the desktop client holds the `stdio` MCP connection. Keep `--preset core` or targeted modules (≤35 tools) for best accuracy. |
 | **Kimi (Moonshot)** | Kimi CLI / Cherry Studio configured with Kimi API | `stdio` | `generic` | Supported | Use `list_analysis_profiles` / `get_analysis_profile` tools rather than relying on MCP prompts/resources. |

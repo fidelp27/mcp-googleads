@@ -4,6 +4,17 @@ All notable changes to `google-ads-mcp-server` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] - 2026-11-22
+
+### Changed
+
+- Documented installation from PyPI, Google Ads API project access, and browser authorization using each user's Desktop OAuth client JSON.
+- Updated the setup examples for Claude Desktop, Claude Code, Codex, and manager accounts.
+
+### Fixed
+
+- Register Antigravity in its current global MCP configuration directory, `~/.gemini/config`, by default.
+
 ## [0.2.2] - 2026-11-22
 
 Docs and surface-area cleanup. No behavior changes to tools or

@@ -196,6 +196,22 @@ def test_doctor_distinguishes_accessible_test_account_with_no_data(tmp_path, mon
 # ---------- connect: new clients & multi-account MCC ----------
 
 
+def test_register_antigravity_uses_current_global_config(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTIGRAVITY_CONFIG_DIR", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    config_path = tmp_path / ".gemini" / "config" / "mcp_config.json"
+    config_path.parent.mkdir(parents=True)
+    other_server = {"command": "another-server", "args": []}
+    config_path.write_text(json.dumps({"mcpServers": {"other": other_server}}), encoding="utf-8")
+
+    connect.register_client("antigravity", None, demo=True)
+
+    servers = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]
+    assert "--demo" in servers[connect.NAME]["args"]
+    assert servers["other"] == other_server
+    assert not (tmp_path / ".gemini" / "antigravity" / "mcp_config.json").exists()
+
+
 def test_register_antigravity_and_gemini_cli_and_generic(tmp_path, monkeypatch, capsys):
     antigravity_dir = tmp_path / "antigravity"
     gemini_dir = tmp_path / "gemini"

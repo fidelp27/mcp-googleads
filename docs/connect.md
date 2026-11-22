@@ -1,164 +1,54 @@
-# Guía de credenciales de Google Ads API
+# Guía de conexión a Google Ads
 
-> **¿Solo querés probar sin configurar nada?** Saltá al [modo demo](#atajo-modo-demo-sin-credenciales) y volvés acá cuando quieras conectar una cuenta real.
+Cada usuario habilita Google Ads API en su propio proyecto de Google Cloud, descarga un JSON OAuth de tipo **Desktop app** y autoriza su cuenta en el navegador. Instalá primero el paquete desde [PyPI](https://pypi.org/project/google-ads-mcp-server/).
 
-Esta guía cubre el flujo completo: proyecto en Google Cloud → habilitar la API → configurar OAuth → obtener Developer Token → conectar la cuenta a tu cliente MCP → verificar con `doctor`. Termina en ~15 minutos la primera vez.
+## Atajo: modo demo sin credenciales
 
----
+Con el paquete instalado, podés probar dos cuentas sintéticas desde Claude Desktop:
 
-## Qué vas a necesitar
-
-| Pieza | Para qué sirve | De dónde sale |
-| --- | --- | --- |
-| **Proyecto en Google Cloud** | Contiene las credenciales OAuth y mide el consumo de API. | [console.cloud.google.com](https://console.cloud.google.com/) |
-| **OAuth Client (Desktop app)** JSON | Autoriza al servidor local a actuar en tu nombre. Se descarga como `client_secret.json`. | Google Cloud → APIs & Services → Credentials |
-| **Developer Token** | Clave que vincula el proyecto Cloud con Google Ads. No siempre es obligatoria. | Google Ads UI → Tools → API Center |
-| **Acceso a la cuenta Google Ads** | Permiso de lectura (como mínimo) sobre la cuenta o MCC que vas a consultar. | Admin de la cuenta Google Ads |
-| **Python ≥ 3.11** en tu máquina | Para correr el servidor MCP. | python.org / uv / pipx |
-
-> **Developer Token: cuándo sí y cuándo no.** Google introdujo en 2026 un [nuevo flujo sin Developer Token explícito](https://developers.google.com/google-ads/api/docs/api-policy/developer-token) cuando usás un proyecto Cloud con la API habilitada y acceso directo. Para la mayoría de los casos **vas a necesitar un Developer Token igual** (acceso Basic o Standard para producción, o un token de prueba para empezar). El servidor lee la variable `GOOGLE_ADS_DEVELOPER_TOKEN` si existe.
-
----
-
-## Atajo: modo demo (sin credenciales)
-
-Si solo querés ver qué puede hacer el MCP, saltate TODO lo anterior:
-
-```bash
-uvx google-ads-mcp-server --transport stdio --demo --preset ecommerce
-```
-
-O registralo directamente en tu cliente de escritorio:
-
-```bash
+```sh
 google-ads-mcp-server register --client claude-desktop --demo
 ```
 
-Levanta 2 cuentas sintéticas (`1111111111` EUR ecommerce y `2222222222` USD B2B leads) con datos realistas. **Read-only estricto**, sin tocar Google Cloud ni Google Ads.
+Reiniciá el cliente y pedile que liste las cuentas de Google Ads. Si después querés conectar una cuenta real en ese mismo cliente, eliminá primero la entrada demo `google_ads_mcp` de su configuración.
 
----
+## 1. Habilitar la API y el acceso del proyecto
 
-## Paso 1 — Crear un proyecto en Google Cloud
+1. Creá o seleccioná un proyecto en [Google Cloud Console](https://console.cloud.google.com/).
+2. Habilitá la [Google Ads API](https://console.cloud.google.com/apis/library/googleads.googleapis.com) en ese proyecto.
+3. Para consultar cuentas reales, solicitá **Explorer** o un nivel superior en la página **Overview** de Google Ads API. El nivel **Test** solo permite consultar cuentas de prueba. Google asigna el [nivel de acceso al proyecto de Google Cloud](https://developers.google.com/google-ads/api/docs/api-policy/access-levels), que debe ser el mismo donde creás el cliente OAuth.
 
-1. Entrá a [console.cloud.google.com](https://console.cloud.google.com/).
-2. Arriba a la izquierda, click en el selector de proyecto → **New Project**.
-3. Nombre sugerido: `google-ads-mcp` (o cualquiera). Dejá *No organization* si es personal. **Create**.
-4. Esperá unos segundos y seleccioná ese proyecto como activo (el banner arriba debe mostrarlo).
+## 2. Configurar OAuth y descargar el JSON
 
-> **Si ya tenés un proyecto de Google Ads API funcionando**, reusalo. No hace falta uno nuevo por cada integración.
+1. Abrí **Google Auth Platform** y completá **Branding** con el nombre de la app, el correo de soporte y el contacto del desarrollador.
+2. En **Audience**, elegí **External** para cuentas personales de Google. Si dejás la app externa en **Testing**, agregá en **Test users** el correo con acceso a Google Ads o al MCC que vas a usar.
+3. En **Data Access → Add or remove scopes**, agregá `https://www.googleapis.com/auth/adwords` y guardá.
+4. En **Clients**, creá un cliente de tipo **Desktop app** y pulsá **Download JSON**. Guardá el archivo en tu equipo.
 
----
+En una app externa en **Testing**, la autorización para Google Ads vence siete días después del consentimiento. Ejecutá `connect` de nuevo para renovarla. Si vas a publicar tu app OAuth para otros usuarios, revisá los requisitos de verificación del permiso sensible. [Audiencia y modo de prueba](https://support.google.com/cloud/answer/15549945) · [Verificación de permisos sensibles](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification)
 
-## Paso 2 — Habilitar la Google Ads API
+## 3. Conectar la cuenta al cliente MCP
 
-1. En el menú lateral: **APIs & Services → Library**.
-2. Buscá *Google Ads API* y entrá.
-3. Click **Enable**. (Si ya está habilitada verás *Manage*.)
+Elegí el comando que corresponda y reemplazá los IDs de ejemplo por los tuyos. Pegá la ruta del JSON cuando el CLI la pida. También podés pasarla como `--oauth-client "C:\Users\Tu Usuario\Downloads\client_secret.json"` en PowerShell.
 
----
+```sh
+# Cuenta directa
+google-ads-mcp-server connect --client claude-desktop --customer 1234567890
 
-## Paso 3 — Configurar la pantalla de consentimiento OAuth
+# Una cuenta cliente bajo un MCC
+google-ads-mcp-server connect --client codex --manager 9999999999 --customer 1234567890
 
-1. **APIs & Services → OAuth consent screen**.
-2. Elegí **External** (necesario salvo que uses Google Workspace con un tenant específico) → **Create**.
-3. Completá los campos mínimos:
-   - *App name:* `google-ads-mcp` (o lo que prefieras — nadie más lo va a ver si queda en Testing).
-   - *User support email:* tu email.
-   - *Developer contact information:* tu email.
-4. **Save and continue**.
-5. **Scopes:** no añadas nada acá. El servidor pide `https://www.googleapis.com/auth/adwords` en runtime, y así funciona sin publicación pública. **Save and continue**.
-6. **Test users:** agregá la cuenta Google con la que vas a autorizar (típicamente, la misma que tiene acceso a Google Ads). **Add users → Save and continue**.
-7. **Back to Dashboard**. Dejá la app en estado **Testing**: no necesita verificación de Google para uso personal/interno.
-
-> **Modo Testing vs. Production:**
-> - *Testing*: cualquier usuario de la lista de "Test users" puede autorizar. El refresh token **expira cada 7 días** si no se usa. Para equipos chicos o uso personal es lo más simple.
-> - *In production*: el refresh token no expira por tiempo. Requiere verificación de Google si pedís scopes sensibles (ésta app no los pide, así que podés publicar sin verificación).
-
----
-
-## Paso 4 — Crear el OAuth Client (Desktop app)
-
-1. **APIs & Services → Credentials → Create credentials → OAuth client ID**.
-2. *Application type:* **Desktop app** (crítico — **no uses Web application**).
-3. *Name:* `google-ads-mcp-desktop` o similar.
-4. **Create**. Aparece un modal con el Client ID y Client Secret.
-5. Click **Download JSON**. Se descarga `client_secret_<xxxx>.apps.googleusercontent.com.json`.
-6. Guardalo en un lugar privado — por ejemplo `~/.google-ads/client_secret.json` (Linux/macOS) o `C:\Users\<vos>\.google-ads\client_secret.json` (Windows). **No lo subas a Git.**
-
----
-
-## Paso 5 — Developer Token de Google Ads
-
-El Developer Token identifica tu integración ante la API de Google Ads. Hay tres niveles:
-
-| Nivel | Qué cuentas podés consultar | Cómo se obtiene | Para qué sirve |
-| --- | --- | --- | --- |
-| **Test access** | Solo [cuentas test](https://developers.google.com/google-ads/api/docs/best-practices/test-accounts). Datos sintéticos. | Inmediato (al crear el token en API Center). | Desarrollo y pruebas sin datos reales. |
-| **Basic access** | Hasta **15 000 operaciones/día** sobre cuentas de producción. | [Formulario de solicitud](https://support.google.com/adspolicy/contact/new_token_application). Tarda 1-3 días. | Uso personal o agencia chica. |
-| **Standard access** | Sin tope (sujeto a cuotas globales). | Upgrade desde Basic, con auditoría de uso. Tarda 1-3 semanas. | Producción, agencias medianas/grandes. |
-
-### Cómo generar el token
-
-1. Entrá a tu **cuenta de administración (MCC)** de Google Ads con la cuenta de Google que autorizaste en el OAuth consent screen.
-2. Arriba a la derecha: **Tools → API Center** (debajo de *Setup*).
-3. Aceptá los términos si es la primera vez.
-4. Vas a ver:
-   - **Developer token**: la clave string (algo tipo `ABCDefGhIJkl_MNO-PqR`).
-   - **Access level**: empieza en *Test*.
-5. Si querés producción, apretá **Apply for Basic access** y completá el formulario (van a preguntarte caso de uso, URL pública, política de privacidad).
-
-Guardá el token — vas a ponerlo como variable de entorno o lo detecta el `connect` si lo pedís con `--developer-token`.
-
-> **Si no tenés un MCC**: podés crear uno gratis en [ads.google.com](https://ads.google.com/home/tools/manager-accounts/) y vincular tu cuenta directa. El Developer Token siempre se emite desde un MCC, incluso si lo usás para una cuenta directa.
-
----
-
-## Paso 6 — Conectar la cuenta al cliente MCP (`connect`)
-
-Teniendo listos:
-- `client_secret.json` (del Paso 4)
-- Developer token (del Paso 5)
-- El Customer ID de la cuenta que querés consultar (10 dígitos, visible arriba a la derecha en Google Ads UI, sin guiones)
-
-### Cuenta directa
-
-```bash
-google-ads-mcp-server connect \
-    --client claude-desktop \
-    --customer 1234567890 \
-    --oauth-client ~/.google-ads/client_secret.json \
-    --developer-token TU_DEV_TOKEN
+# Todas las cuentas habilitadas bajo un MCC, excluyendo cuentas administradoras
+google-ads-mcp-server connect --client claude-desktop --manager 9999999999 --all-mcc-clients --preset agency
 ```
 
-El comando:
-1. Imprime una URL — abrí el browser, ingresá con la cuenta Google que agregaste como Test user.
-2. Google pide confirmación: *"google-ads-mcp quiere acceder a Google Ads"* → **Allow**.
-3. El servidor captura el redirect en loopback, canjea el código por tokens, y guarda:
-   - `~/.google-ads/token.json` (refresh token cifrado por el sistema operativo si está disponible)
-   - El perfil en `~/.google-ads/profiles/<customer>.json`
-   - La configuración en `claude_desktop_config.json` (o equivalente del cliente elegido)
-4. Verifica contra la API que las credenciales funcionan y que la cuenta devuelve datos.
+Iniciá sesión en el navegador con la cuenta de Google que tiene acceso a Google Ads. El CLI comprueba las cuentas seleccionadas, guarda el perfil local y registra el MCP en modo de solo lectura. Si omitís `--customer` y hay varias cuentas accesibles, el CLI te pide los IDs.
 
-### Cuenta bajo MCC (una o varias)
+Podés reutilizar el perfil en otro cliente sin autorizar de nuevo:
 
-```bash
-# Una cuenta bajo un MCC
-google-ads-mcp-server connect \
-    --client codex --manager 9999999999 --customer 1234567890 \
-    --oauth-client ~/.google-ads/client_secret.json --developer-token TU_DEV_TOKEN
-
-# Todas las cuentas activas bajo un MCC (auto-discovery)
-google-ads-mcp-server connect \
-    --client antigravity --manager 9999999999 --all-mcc-clients --preset agency \
-    --oauth-client ~/.google-ads/client_secret.json --developer-token TU_DEV_TOKEN
-```
-
-### Reusar el perfil en otro cliente
-
-Una vez tenés el perfil guardado, agregarlo a otro cliente no pide OAuth de nuevo:
-
-```bash
-google-ads-mcp-server register --client gemini-cli --preset leads
+```sh
+google-ads-mcp-server register --client codex
+google-ads-mcp-server register --client claude-code
 ```
 
 ### Elegir qué tools se cargan (`--preset` / `--modules`)
@@ -180,89 +70,50 @@ google-ads-mcp-server register --client gemini-cli --preset leads
 | Claude Desktop | `claude-desktop` | Agrega el server a `claude_desktop_config.json` |
 | Claude Code | `claude-code` | Usa `claude mcp add-json --scope user` |
 | Codex (CLI / Desktop / IDE) | `codex` | Agrega a `~/.codex/config.toml` |
-| Antigravity | `antigravity` | Agrega a `~/.gemini/antigravity/mcp_config.json` |
+| Antigravity | `antigravity` | Agrega a `~/.gemini/config/mcp_config.json` |
 | Gemini CLI | `gemini-cli` | Agrega a `~/.gemini/settings.json` |
 | Cursor / VS Code / Cherry Studio / Cline / Kimi / otros | `generic` | Imprime el JSON `{"mcpServers": ...}` por stdout |
 
----
+### Antigravity con la versión 0.2.2
 
-## Paso 7 — Verificar (`doctor`)
+La versión 0.2.2 escribe en la ruta antigua por defecto. En PowerShell, indicá la carpeta global actual antes de ejecutar `connect` o `register`:
 
-```bash
-google-ads-mcp-server doctor            # humano, con llamada a la API
-google-ads-mcp-server doctor --offline  # solo config local, sin red
-google-ads-mcp-server doctor --json     # salida para CI/scripts
-```
-
-`doctor` separa claramente:
-- **Credencial inválida** vs. **permiso faltante** vs. **límite de access level** vs. **cuenta sin datos recientes**
-- Currency y timezone detectados
-- Versión de API vs. la soportada por el servidor
-
-Si todo está verde, abrí tu cliente (reiniciá Claude Desktop) y probá:
-- *"Corré `server_status` y después `list_accounts`"*
-- *"Dame el `get_campaign_performance` de los últimos 30 días en la cuenta `1234567890`"*
-
----
-
-## Troubleshooting
-
-### `invalid_grant` o `Token has been expired or revoked`
-- **Causa más común:** la OAuth consent screen está en *Testing* y el refresh token quedó inactivo más de 7 días.
-- **Fix:** volvé a correr `google-ads-mcp-server connect ...`. O pasá la app a **In production** (no requiere verificación si no pedís scopes sensibles).
-
-### `USER_PERMISSION_DENIED` o `DEVELOPER_TOKEN_NOT_APPROVED`
-- El Developer Token no tiene permiso sobre esa cuenta.
-- Si estás en *Test access*, solo funcionan [cuentas test](https://developers.google.com/google-ads/api/docs/best-practices/test-accounts). Creá una en Google Ads o solicitá *Basic access*.
-- Si estás en *Basic*, verificá que la cuenta de Google autorizada tenga permiso Read-Only o superior sobre el Customer ID.
-
-### `access_denied` al autorizar en el browser
-- La cuenta Google que estás usando **no está en la lista de Test users** de la OAuth consent screen. Agregala en Google Cloud → OAuth consent screen → Test users.
-
-### `OAuth client was not found`
-- El JSON que pasaste a `--oauth-client` quedó inválido o apunta a un cliente borrado. Volvé a descargarlo desde Credentials.
-
-### `customer not found` o `CUSTOMER_NOT_ENABLED`
-- El Customer ID tiene guiones (`XXX-XXX-XXXX`): pasalo sin guiones (`XXXXXXXXXX`).
-- La cuenta está suspendida o cancelada: verificá en Google Ads UI.
-
-### `doctor` dice `queries return no rows` pero la cuenta tiene datos
-- Timezone de la cuenta vs. la query: el servidor usa `complete_days_only=True` en el timezone de la cuenta — si recién arrancó el día allá, podés no ver nada aún.
-- Access level: cuentas de **Test access** solo tienen datos sintéticos limitados.
-
-### Windows: rutas con espacios
-Encerrá en comillas y escapá las barras:
 ```powershell
-google-ads-mcp-server connect --client claude-desktop `
-    --customer 1234567890 `
-    --oauth-client "C:\Users\Mi Usuario\.google-ads\client_secret.json" `
-    --developer-token TU_DEV_TOKEN
+$env:ANTIGRAVITY_CONFIG_DIR = Join-Path $env:USERPROFILE '.gemini\config'
+google-ads-mcp-server register --client antigravity
 ```
 
----
+Si todavía no tenés un perfil, usá `google-ads-mcp-server connect --client antigravity` en lugar de `register`. En macOS o Linux, configurá la carpeta con `export ANTIGRAVITY_CONFIG_DIR="$HOME/.gemini/config"`.
+
+## 4. Verificar la conexión
+
+```sh
+google-ads-mcp-server doctor
+google-ads-mcp-server doctor --offline
+google-ads-mcp-server doctor --json
+```
+
+`doctor` verifica el perfil y el acceso a las cuentas. `--offline` comprueba la configuración local sin conectarse a Google. Reiniciá el cliente MCP y pedile que ejecute `server_status`, liste tus cuentas con `list_accounts` y consulte el rendimiento de una campaña autorizada.
+
+## Problemas frecuentes
+
+| Síntoma | Qué revisar |
+| --- | --- |
+| Google bloquea el consentimiento o devuelve `access_denied` | Revisá **Audience**, el correo autorizado y la configuración del permiso `adwords`. Si el proyecto está en **Testing**, confirmá que el correo figura en **Test users**. |
+| `invalid_grant` | Si la autorización venció o fue revocada, ejecutá `connect` de nuevo. |
+| `CLOUD_PROJECT_NOT_APPROVED_FOR_PRODUCTION` | Solicitá **Explorer** o superior para el proyecto dueño del cliente OAuth. |
+| `USER_PERMISSION_DENIED` | Confirmá que el correo tiene acceso a la cuenta y, si corresponde, pasá el ID del administrador con `--manager`. |
+| `OAuth client was not found` | Verificá que el cliente OAuth siga activo y que el JSON corresponda a una **Desktop app**. |
+| `CUSTOMER_NOT_ENABLED` o cuenta no encontrada | Revisá el ID de diez dígitos y el estado de la cuenta en Google Ads. |
+| `doctor` indica que la consulta no devolvió filas | Probá un período con actividad. Los informes de rendimiento suelen usar días completos en la zona horaria de la cuenta. |
+| `google_ads_mcp is already configured` | Si querés cambiar de modo o de perfil, eliminá la entrada anterior del cliente y volvé a registrar. |
 
 ## Dónde se guarda cada cosa
 
-| Ruta | Qué contiene |
+| Sistema | Perfil local predeterminado |
 | --- | --- |
-| `~/.google-ads/client_secret.json` | Credenciales OAuth del Cloud project. **Nunca commitear.** |
-| `~/.google-ads/token.json` | Refresh token (cifrado cuando el SO lo permite). **Nunca commitear.** |
-| `~/.google-ads/profiles/<customer>.json` | Perfil del servidor (customer IDs permitidos, preset, módulos). |
-| `claude_desktop_config.json` (o equivalente) | Entrada `mcpServers` con comando, args y env vars del profile. |
-| `./data/audit*.jsonl` | Log append-only de llamadas a la API (gitignoreado por default). |
+| Windows | `%LOCALAPPDATA%\google-ads-mcp\profile.json` |
+| macOS | `~/Library/Application Support/google-ads-mcp/profile.json` |
+| Linux | `${XDG_CONFIG_HOME:-$HOME/.config}/google-ads-mcp/profile.json` |
 
-> **Variables de entorno equivalentes** (útiles si corrés el servidor sin el CLI `connect`):
-> - `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`
-> - `GOOGLE_ADS_DEVELOPER_TOKEN`
-> - `GOOGLE_ADS_LOGIN_CUSTOMER_ID` (el MCC, si aplica)
-> - `GOOGLE_ADS_TOKEN_PATH` (ruta al `token.json`)
-> - `ALLOWED_CUSTOMER_IDS` (whitelist CSV)
-> - `READ_ONLY_MODE=true` (recomendado siempre salvo mutaciones)
-
----
-
-## Siguientes pasos
-
-- Revisá [`guardrails.md`](guardrails.md) para entender los controles de seguridad del modo escritura.
-- Si vas a operar múltiples cuentas, mirá [`compatibility-matrix.md`](compatibility-matrix.md) y [`remote-pilot.md`](remote-pilot.md).
-- Para pre-flights automatizados en CI: `google-ads-mcp-server doctor --json` sale con exit code distinto de 0 si algo falla.
+El perfil contiene el refresh token y los IDs de las cuentas. El archivo local se guarda como JSON sin cifrar. Mantené privados el perfil y el JSON descargado. La configuración del cliente MCP referencia la ruta del perfil.
