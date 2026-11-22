@@ -432,7 +432,6 @@ Clients that support MCP Prompts and Resources automatically receive:
 | **Prompt** | `safe_campaign_change` | Guided `dry_run -> review diff -> approval_id -> execute` change workflow. |
 | **Resource** | `agency://governance/status` | Live read-only snapshot of active guardrails, limits, and operator settings. |
 | **Resource** | `gaql://reference` | Compact GAQL field & resource reference. |
-| **Template** | `agency://docs/{domain}` | Embedded domain guides (campaigns, guardrails, reporting, offline conversions, Keyword Planner, etc.). |
 | **Template** | `agency://tools/{tool_name}` | Tool-level usage documentation and safety notes. |
 
 > **Multi-AI self-containment:** Critical workflows (analysis profiles, `dry_run` rules, currency/timezone metadata, truncation flags) are also exposed directly through tools so clients that ignore MCP Prompts/Resources work with zero loss of functionality.

@@ -2,26 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from .api import format_json
-from .config import PROJECT_ROOT, get_active_customer_id, get_settings
+from .config import get_active_customer_id, get_settings
 
 
-DOCS = {
-    "campaigns": "campaigns.md",
-    "keywords": "keywords.md",
-    "keyword-planner": "keyword-planner.md",
-    "guardrails": "guardrails.md",
-    "agency-playbook": "agency-playbook.md",
-    "client-transparency": "client-facing.md",
-    "audiences-assets": "audiences-assets.md",
-    "conversions-recommendations": "conversions-recommendations.md",
-    "reporting-mcc": "reporting-mcc.md",
-    "experiments": "experiments.md",
-    "demand-gen": "demand-gen.md",
-    "offline-conversions": "offline-conversions.md",
-}
 KNOWN_TOOLS = set(
     """
 server_status list_accounts execute_gaql_query get_campaign_performance
@@ -79,75 +63,28 @@ exclude_placements add_account_negative_keywords
 
 
 def _tool_domain(tool_name: str) -> str:
-    if tool_name in {
-        "generate_keyword_ideas", "generate_keyword_historical_metrics",
-        "generate_keyword_forecast", "find_geo_target_constants",
-    }:
-        return "keyword-planner"
-    if tool_name == "get_impression_share_losses":
-        return "reporting-mcc"
-    if tool_name in {
-        "check_consent_signal_coverage",
-        "audit_conversion_tracking",
-        "get_offline_conversion_diagnostics",
-    }:
-        return "conversions-recommendations"
-    if tool_name == "get_auction_insights":
-        return "reporting-mcc"
-    if tool_name == "mcc_bulk_apply":
-        return "agency-playbook"
-    if tool_name in {
-        "add_customer_match_members",
-        "remove_customer_match_members",
-        "get_customer_match_list_stats",
-        "get_offline_user_data_job_status",
-    }:
-        return "audiences-assets"
-    if tool_name in {
-        "list_experiments",
-        "get_experiment",
-        "get_experiment_results",
-        "create_experiment",
-        "schedule_experiment",
-        "end_experiment",
-    }:
-        return "experiments"
-    if tool_name in {
-        "create_demand_gen_campaign",
-        "create_demand_gen_ad_group",
-        "get_demand_gen_performance",
-    }:
-        return "demand-gen"
-    if tool_name in {
-        "upload_click_conversions",
-        "upload_call_conversions",
-        "upload_conversion_adjustments",
-    }:
-        return "offline-conversions"
+    """Return the high-level domain label for a tool.
+
+    The only on-disk runbook shipped with the package is `guardrails`;
+    other domain labels are informational (write vs. read, channel) and
+    do not resolve to `agency://docs/<domain>`.
+    """
+    if any(token in tool_name for token in ("audit", "approval", "revert", "context")):
+        return "guardrails"
     if any(token in tool_name for token in ("campaign", "budget", "ad_group", "ad_")):
         return "campaigns"
     if any(token in tool_name for token in ("keyword", "search_term", "waste")):
-        return "keywords"
+        return "search"
     if any(token in tool_name for token in ("audience", "asset", "extension", "modifier")):
         return "audiences-assets"
     if any(token in tool_name for token in ("conversion", "recommendation")):
-        return "conversions-recommendations"
+        return "measurement"
     if any(token in tool_name for token in ("report", "dashboard", "client", "period", "alert")):
-        return "reporting-mcc"
-    if any(token in tool_name for token in ("audit", "approval", "revert", "context")):
-        return "guardrails"
-    return "agency-playbook"
+        return "reporting"
+    return "agency"
 
 
 def register_resources(mcp) -> None:
-    @mcp.resource("agency://docs/{domain}")
-    def agency_documentation(domain: str) -> str:
-        """Read an embedded runbook by domain."""
-        filename = DOCS.get(domain)
-        if not filename:
-            raise ValueError(f"Unknown documentation domain: {domain}")
-        return (PROJECT_ROOT / "docs" / filename).read_text(encoding="utf-8")
-
     @mcp.resource("agency://tools/{tool_name}")
     def tool_documentation(tool_name: str) -> str:
         """Return operational guidance for every exposed tool."""
@@ -165,7 +102,6 @@ def register_resources(mcp) -> None:
             {
                 "tool_name": tool_name,
                 "domain": domain,
-                "runbook_resource": f"agency://docs/{domain}",
                 "workflow": (
                     [
                         "Gather fresh evidence with read-only tools.",
