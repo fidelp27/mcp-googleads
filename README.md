@@ -4,105 +4,109 @@
 
 An open-source, **read-only-by-default** **Model Context Protocol (MCP)** server for auditing, reporting, diagnosing, and safely managing Google Ads accounts from desktop and CLI AI apps (**Claude Desktop, Claude Code, Codex, Antigravity, Gemini CLI, Cherry Studio / Cline / Cursor / VS Code with DeepSeek, Kimi, OpenAI, Anthropic, or Gemini**).
 
-Built to complement Google's official MCP server with **142 structured tools** (74 read/diagnostic/analytics tools + 68 opt-in guarded write/governance tools), **10 modular domains**, **5 one-word presets**, **editable Markdown + TOML analysis profiles**, **account-timezone & truncation-safe analytics**, **multi-currency & multi-MCC orchestration**, and **human-in-the-loop write guardrails**.
+Ships **142 structured tools** across **10 modular domains** with **5 one-word presets**, **editable Markdown + TOML analysis profiles**, **account-timezone & truncation-safe analytics**, **multi-currency / multi-MCC orchestration**, and a **guarded write engine with human-in-the-loop approvals**.
+
+[![PyPI](https://img.shields.io/pypi/v/google-ads-mcp-server.svg)](https://pypi.org/project/google-ads-mcp-server/) [![Python](https://img.shields.io/pypi/pyversions/google-ads-mcp-server.svg)](https://pypi.org/project/google-ads-mcp-server/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
 
 ## Table of Contents
 
-1. [What This MCP Does (Overview)](#what-this-mcp-does-overview)
-2. [Quickstart in 30 Seconds (`--demo`)](#quickstart-in-30-seconds---demo)
-3. [Connect Real Accounts (`connect` + `doctor` + `register`)](#connect-real-accounts-connect--doctor--register)
-4. [Modular Tool Catalog & Presets (`--preset` / `--modules`)](#modular-tool-catalog--presets---preset----modules)
-5. [Complete Functionality & Tool Reference (All 142 Tools)](#complete-functionality--tool-reference-all-142-tools)
-   - [Core Module (25 tools — loaded by default)](#1-core-module-25-tools--loaded-by-default)
-   - [Diagnostics Module (5 tools)](#2-diagnostics-module-5-tools)
-   - [Measurement Module (8 tools)](#3-measurement-module-8-tools)
-   - [Search Module (16 tools)](#4-search-module-16-tools)
-   - [Performance Max Module (8 tools)](#5-performance-max-module-8-tools)
-   - [Shopping Module (6 tools)](#6-shopping-module-6-tools)
-   - [Display Module (5 tools)](#7-display-module-5-tools)
-   - [Demand Gen Module (5 tools)](#8-demand-gen-module-5-tools)
-   - [MCC & Agency Governance Read Module (11 tools)](#9-mcc--agency-governance-read-module-11-tools)
-   - [Operations Module (68 guarded write & governance tools — opt-in only)](#10-operations-module-68-guarded-write--governance-tools--opt-in-only)
-6. [MCP Prompts & Resources](#mcp-prompts--resources)
-7. [Customizable Analysis Profiles (Markdown + TOML)](#customizable-analysis-profiles-markdown--toml)
-8. [CLI Commands & Scheduled Alerts](#cli-commands--scheduled-alerts)
-9. [Data Accuracy, Truncation & Safety Architecture](#data-accuracy-truncation--safety-architecture)
-10. [Client Compatibility & Self-Hosted HTTP](#client-compatibility--self-hosted-http)
-11. [Development & Documentation](#development--documentation)
+1. [Install](#1-install)
+   - [A. Zero-credential demo (30 seconds)](#a-zero-credential-demo-30-seconds)
+   - [B. Connect a real Google Ads account](#b-connect-a-real-google-ads-account)
+   - [C. Manual `claude_desktop_config.json` (fallback)](#c-manual-claude_desktop_configjson-fallback)
+   - [D. Verify everything (`doctor`)](#d-verify-everything-doctor)
+2. [What You Get (Feature Summary)](#2-what-you-get-feature-summary)
+3. [Tool Catalog & Presets](#3-tool-catalog--presets)
+4. [Complete Tool Reference (All 142 Tools)](#4-complete-tool-reference-all-142-tools)
+   - [4.1 `core` Module (25 tools — loaded by default)](#41-core-module-25-tools--loaded-by-default)
+   - [4.2 `diagnostics` Module (5 tools)](#42-diagnostics-module-5-tools)
+   - [4.3 `measurement` Module (8 tools)](#43-measurement-module-8-tools)
+   - [4.4 `search` Module (16 tools)](#44-search-module-16-tools)
+   - [4.5 `pmax` Module (8 tools)](#45-pmax-module-8-tools)
+   - [4.6 `shopping` Module (6 tools)](#46-shopping-module-6-tools)
+   - [4.7 `display` Module (5 tools)](#47-display-module-5-tools)
+   - [4.8 `demand-gen` Module (5 tools)](#48-demand-gen-module-5-tools)
+   - [4.9 `mcc` Module (11 tools)](#49-mcc-module-11-tools)
+   - [4.10 `operations` Module (68 guarded write & governance tools — opt-in only)](#410-operations-module-68-guarded-write--governance-tools--opt-in-only)
+5. [MCP Prompts & Resources](#5-mcp-prompts--resources)
+6. [Customizable Analysis Profiles (Markdown + TOML)](#6-customizable-analysis-profiles-markdown--toml)
+7. [CLI Commands & Scheduled Alerts](#7-cli-commands--scheduled-alerts)
+8. [Data Accuracy, Truncation & Safety Architecture](#8-data-accuracy-truncation--safety-architecture)
+9. [Client Compatibility & Self-Hosted HTTP](#9-client-compatibility--self-hosted-http)
+10. [Development & Documentation](#10-development--documentation)
 
 ---
 
-## What This MCP Does (Overview)
+## 1. Install
 
-- **Zero-credential `--demo` sandbox:** Test the full read/reporting/audit workflow in 30 seconds against two synthetic accounts (`1111111111` EUR ecommerce in `Europe/Madrid` + `2222222222` USD B2B Leads in `America/New_York`) before touching Google Cloud.
-- **Guided desktop onboarding & preflight (`connect`, `register`, `doctor`, `serve`):** Browser OAuth flow, direct & multi-account/MCC scoping (`--all-mcc-clients`), preset persistence (`--preset`, `--modules`), and actionable diagnostics (`doctor` / `doctor --offline` / `doctor --json`) that separate credential errors, Cloud project access-level limits, permission issues, and zero-data test accounts.
-- **Compact modular tool surface:** Default `core` exposes **25 focused tools** (strictly validated against a multi-AI JSON Schema linter with no untyped `dict[str, Any]` parameters) so tool calling stays accurate and low-token across Claude, OpenAI, Gemini, DeepSeek, and Kimi.
-- **360° operational diagnostics:**
-  - **Delivery & policy:** Combines account status, `billing_setup`, `account_budget`, campaign serving reasons, impression share losses, and ad/asset/keyword disapprovals into `confirmed_causes`, `hypotheses`, and `insufficient_data`.
-  - **Budget pacing:** Month-to-date spend, 7-day vs. MTD run rate, end-of-month projection, remaining budget, and required daily spend in the account's time zone.
-  - **Channel depth:** Search (terms, n-gram clusters, Quality Score 3-component breakdown, RSA Ad Strength, Keyword Planner, Experiments, Auction Insights API + EN/ES UI CSV fallback), Performance Max (asset groups, v25 asset `primary_status`/approvals, signals, listing filters, per-campaign search themes with explicit sampling coverage, placements), Shopping (SKU/brand/category/product-group ROAS & wasted spend), Display & Demand Gen (placements, mobile-app waste, video view rate & quartile funnel `p25/p50/p75/p100`).
-- **Conversion & offline measurement audits:** Maps conversion ownership (account vs. MCC), account/campaign/custom goals (`conversion_goal_campaign_config`), secondary actions promoted into custom goals, Smart Bidding alignment, double-counting risks, Enhanced Conversions prerequisites, honest primary-vs-all measurement scope (never false-positive Consent Mode claims), offline upload health without PII, and **Data Manager API** upgrade eligibility.
-- **Trustworthy reporting & multi-currency/multi-MCC accuracy:** Account-timezone closed days (`complete_days_only=True`), `queried_at_utc`, `conversion_lag_warning`, interaction-date vs. `conversions_by_conversion_date` time series, separated per-currency agency totals, dynamic per-account `login-customer-id` routing, row caps (`GOOGLE_ADS_MAX_SEARCH_ROWS`) with `truncated` / `totals_are_partial`, and automatic downgrade of absence-based alerts to `insufficient_data` when backing queries are truncated.
-- **Guarded write engine (opt-in only):** When `READ_ONLY_MODE=true` (the default, and always enforced in managed desktop profiles), all 68 write tools in `operations` are **omitted from `tools/list`**. When explicitly enabled (`READ_ONLY_MODE=false`), mutations enforce mandatory `dry_run=true` (`validateOnly=true`) previews with diffs, exact confirmation phrases, economic caps, optimistic locking (`state_verifier`), partial retry for multi-account batches (`mcc_bulk_apply`), PII-redacted append-only audit logs, and `revert_operation`.
-
----
-
-## Quickstart in 30 Seconds (`--demo`)
+**Requirements:** Python ≥ 3.11 and either [`uv`](https://docs.astral.sh/uv/) (recommended) or `pipx`/`pip`.
 
 ```bash
-pip install google-ads-mcp-server
-# or from a local checkout:
-# pip install -e ".[dev]"
+# Option 1 — no install, auto-fetched on every run (recommended for desktop clients)
+uvx google-ads-mcp-server --help
 
-# Register zero-credential demo mode in your desktop AI client:
-google-ads-mcp-server register --client claude-desktop --demo
-# Optional: include domain modules via --preset (e.g. leads, ecommerce, agency, full):
-google-ads-mcp-server register --client generic --demo --preset ecommerce
+# Option 2 — isolated install
+pipx install google-ads-mcp-server
+
+# Option 3 — plain pip
+pip install google-ads-mcp-server
 ```
 
-Or run directly over `stdio`:
+Pick **one** of the three setup paths below (A, B, or C) depending on whether you want a demo, an automated real-account connection, or manual control over `claude_desktop_config.json`.
+
+### A. Zero-credential demo (30 seconds)
+
+No Google Cloud project, no OAuth, no developer token. Just synthetic accounts (`1111111111` EUR ecommerce + `2222222222` USD leads) you can audit, report on, and diagnose end-to-end.
+
+```bash
+# Register demo mode in your desktop AI client of choice
+google-ads-mcp-server register --client claude-desktop --demo
+google-ads-mcp-server register --client codex         --demo --preset ecommerce
+google-ads-mcp-server register --client gemini-cli    --demo --preset leads
+google-ads-mcp-server register --client generic       --demo                    # prints JSON for Cursor/VS Code/Cherry/Cline/Kimi
+```
+
+Or launch directly over `stdio` without registering:
 
 ```bash
 google-ads-mcp-server --transport stdio --demo --preset ecommerce
 ```
 
-Example prompts to try immediately in demo mode:
+Then in Claude Desktop (or any supported client), try:
 - *"List my accessible accounts and build a multi-currency agency dashboard."*
 - *"Load the `leads-audit` analysis profile and audit account `2222222222`."*
 - *"Diagnose delivery issues, budget pacing, and wasted search terms on account `1111111111`."*
 - *"Run `get_pmax_diagnostics` and `get_shopping_performance` on account `1111111111`."*
 
----
+### B. Connect a real Google Ads account
 
-## Connect Real Accounts (`connect` + `doctor` + `register`)
-
-1. Enable **Google Ads API** in a Google Cloud project and download a **Desktop app** OAuth client JSON ([detailed setup guide](docs/connect.md)).
-2. Authorize in your browser, select account(s) and optional preset/modules, and run `doctor`:
+1. Enable the **Google Ads API** in a Google Cloud project and download a **Desktop app** OAuth client JSON. Get a **developer token** from your MCC. ([detailed setup guide](docs/connect.md)).
+2. Run `connect` — it opens the browser, saves an encrypted profile under `~/.google-ads/`, wires the chosen desktop AI client's config, and locks `READ_ONLY_MODE=true` by default.
 
 ```bash
-# Direct account with default compact catalog (`core`, 25 tools)
-google-ads-mcp-server connect --client claude-desktop --customer 1234567890 --oauth-client /path/to/client_secret.json
+# Direct account with the compact 25-tool `core` catalog
+google-ads-mcp-server connect --client claude-desktop --customer 1234567890 \
+    --oauth-client /path/to/client_secret.json
 
-# Direct account with ecommerce modules (PMax, Shopping, Measurement, Diagnostics)
-google-ads-mcp-server connect --client codex --customer 1234567890 --preset ecommerce --oauth-client /path/to/client_secret.json
+# Direct account with ecommerce depth (PMax, Shopping, Measurement, Diagnostics)
+google-ads-mcp-server connect --client codex --customer 1234567890 --preset ecommerce \
+    --oauth-client /path/to/client_secret.json
 
-# MCC account scoping all enabled child accounts
-google-ads-mcp-server connect --client antigravity --manager 9999999999 --all-mcc-clients --preset agency --oauth-client /path/to/client_secret.json
+# MCC: automatically scope every enabled child account, with dynamic per-account login-customer-id routing
+google-ads-mcp-server connect --client antigravity --manager 9999999999 --all-mcc-clients --preset agency \
+    --oauth-client /path/to/client_secret.json
 
-# Reuse the saved profile in another client
+# Reuse a saved profile in another client (no new OAuth round-trip)
 google-ads-mcp-server register --client gemini-cli --preset leads
-
-# Verify credentials, API access, currency/timezone, and recent data
-google-ads-mcp-server doctor
 ```
 
-Supported `--client` targets: `claude-desktop`, `claude-code`, `codex`, `antigravity`, `gemini-cli`, `generic` (outputs standard `{"mcpServers": ...}` JSON for Cursor, VS Code, Cherry Studio, Cline, Kimi CLI, etc.).
+Supported `--client` targets: `claude-desktop`, `claude-code`, `codex`, `antigravity`, `gemini-cli`, `generic` (emits the standard `{"mcpServers": ...}` JSON for Cursor, VS Code, Cherry Studio, Cline, Kimi CLI, etc.).
 
-Managed profiles **always** launch with `READ_ONLY_MODE=true` and scope access strictly to the authorized customer IDs (plus manager ID if configured).
+Managed profiles **always** launch with `READ_ONLY_MODE=true` and scope access strictly to the authorized customer IDs (plus the manager ID when configured).
 
-### Manual Claude Desktop config (fallback)
+### C. Manual `claude_desktop_config.json` (fallback)
 
 If you prefer to edit `claude_desktop_config.json` by hand instead of using `connect` / `register`, open it from Claude Desktop → *Settings → Developer → Edit Config* and paste a block like this under `mcpServers` (edit paths and IDs):
 
@@ -171,9 +175,42 @@ If you prefer to edit `claude_desktop_config.json` by hand instead of using `con
 
 After editing, fully quit and reopen Claude Desktop so it picks up the new server.
 
+### D. Verify everything (`doctor`)
+
+```bash
+google-ads-mcp-server doctor            # human-readable, hits the API
+google-ads-mcp-server doctor --offline  # skips network, checks config only
+google-ads-mcp-server doctor --json     # machine-readable for scripts/CI
+```
+
+`doctor` separates credential problems, Cloud project access-level limits, permission issues, and zero-data test accounts — so you know exactly what to fix.
+
 ---
 
-## Modular Tool Catalog & Presets (`--preset` / `--modules`)
+## 2. What You Get (Feature Summary)
+
+- **Zero-credential `--demo` sandbox** against two realistic synthetic accounts (EUR ecommerce in `Europe/Madrid` + USD B2B leads in `America/New_York`) — full read, audit, and reporting workflow in 30 seconds.
+- **Guided onboarding & preflight** (`connect`, `register`, `doctor`, `serve`): browser OAuth, direct & multi-account/MCC scoping (`--all-mcc-clients`), preset persistence (`--preset`, `--modules`), actionable diagnostics.
+- **Compact modular tool surface:** default `core` exposes **25 focused tools** validated against a multi-AI JSON Schema linter (no untyped `dict[str, Any]`), so tool calling stays accurate and low-token across Claude, OpenAI, Gemini, DeepSeek, and Kimi.
+- **360° operational diagnostics:**
+  - *Delivery & policy:* Combines account status, `billing_setup`, `account_budget`, campaign serving reasons, impression share losses, and ad/asset/keyword disapprovals into `confirmed_causes`, `hypotheses`, and `insufficient_data`.
+  - *Budget pacing:* MTD spend, 7-day vs. MTD run rate, end-of-month projection, remaining budget, and required daily spend — in the account's time zone.
+  - *Channel depth:*
+    - **Search** — search terms, n-gram clusters, Quality Score 3-component breakdown, RSA Ad Strength, Keyword Planner, Experiments, Auction Insights API + EN/ES UI CSV fallback.
+    - **Performance Max** — asset groups, v25 asset `primary_status`/approvals, signals, listing filters, per-campaign search themes with explicit sampling coverage, placements.
+    - **Shopping** — SKU/brand/category/product-group ROAS and wasted spend.
+    - **Display & Demand Gen** — placements, mobile-app waste, video view rate and quartile funnel `p25/p50/p75/p100`.
+- **Conversion & offline measurement audits:** Maps conversion ownership (account vs. MCC), account/campaign/custom goals (`conversion_goal_campaign_config`), secondary actions promoted into custom goals, Smart Bidding alignment, double-counting risks, Enhanced Conversions prerequisites, honest primary-vs-all measurement scope, offline upload health without PII, and **Data Manager API** upgrade eligibility.
+- **Trustworthy reporting & multi-currency / multi-MCC accuracy:** Account-timezone closed days (`complete_days_only=True`), `queried_at_utc`, `conversion_lag_warning`, interaction-date vs. `conversions_by_conversion_date` series, strictly per-currency agency totals (`managed_totals_by_currency`), dynamic per-account `login-customer-id` routing, bounded search with `truncated` / `totals_are_partial` flags, and automatic downgrade of absence-based alerts to `insufficient_data` when backing queries are truncated.
+- **Customizable analysis profiles** (Markdown + TOML) packaged in the wheel: `leads-audit`, `ecommerce-audit`, `agency-weekly`, plus user overrides in `GOOGLE_ADS_CONFIG_DIR/profiles/`.
+- **MCC agency governance:** parallel GAQL across clients (`run_across_clients`), consolidated multi-account dashboards strictly separated by currency, pending-approval queue, expiring-approval alerts, exportable append-only audit logs with rotation.
+- **Guarded write engine (opt-in only):** When `READ_ONLY_MODE=true` (the default), all **68 write tools** are **hidden from `tools/list`**. When explicitly enabled, mutations enforce mandatory `dry_run=true` previews with diffs, exact confirmation phrases, economic caps (`MAX_DAILY_BUDGET_INCREASE_MICROS`, `MAX_BUDGET_INCREASE_PCT`, `MAX_BID_MICROS`), optimistic locking (`state_verifier`), partial retry for multi-account batches (`mcc_bulk_apply` with `retry_failed_from_approval_id`), PII-redacted append-only audit logs, and `revert_operation` on supported families.
+- **Self-hosted HTTP & multi-tenant remote pilot (opt-in):** `--transport streamable-http` (loopback-only by default) for single-user self-hosting, and `google-ads-mcp-server remote` for a multi-user gateway with OAuth JWT validation, per-tenant worker isolation, Fernet-encrypted refresh tokens, PKCE self-serve onboarding (`/connect`), idle-evicting worker pool, and idempotent disconnect + Google revocation. See [Remote Pilot & Self-Serve Guide](docs/remote-pilot.md).
+- **Scheduled alerts CLI** (`google-ads-mcp-server alerts`) for cron, GitHub Actions, or Slack/email integrations — exits with code `2` on alert hits.
+
+---
+
+## 3. Tool Catalog & Presets (`--preset` / `--modules`)
 
 Instead of overwhelming LLMs with all 142 tools at once, only `core` (**25 tools**) loads by default. Activate domain modules with `--preset` or `--modules` (in `connect`, `register`, `serve`, CLI flags, or `GOOGLE_ADS_PRESET` / `GOOGLE_ADS_MODULES`):
 
@@ -195,9 +232,9 @@ google-ads-mcp-server --transport stdio --modules core,diagnostics,measurement,p
 
 ---
 
-## Complete Functionality & Tool Reference (All 142 Tools)
+## 4. Complete Tool Reference (All 142 Tools)
 
-### 1. `core` Module (25 tools — loaded by default)
+### 4.1 `core` Module (25 tools — loaded by default)
 
 Account discovery, safe GAQL, core campaign/ad/creative read, time-series trends, reports, waste detection, alerts, and customizable analysis profiles.
 
@@ -231,7 +268,7 @@ Account discovery, safe GAQL, core campaign/ad/creative read, time-series trends
 
 ---
 
-### 2. `diagnostics` Module (5 tools)
+### 4.2 `diagnostics` Module (5 tools)
 
 Included in `leads`, `ecommerce`, `agency`, and `full` presets.
 
@@ -245,7 +282,7 @@ Included in `leads`, `ecommerce`, `agency`, and `full` presets.
 
 ---
 
-### 3. `measurement` Module (8 tools)
+### 4.3 `measurement` Module (8 tools)
 
 Included in `leads`, `ecommerce`, `agency`, and `full` presets.
 
@@ -262,7 +299,7 @@ Included in `leads`, `ecommerce`, `agency`, and `full` presets.
 
 ---
 
-### 4. `search` Module (16 tools)
+### 4.4 `search` Module (16 tools)
 
 Included in `leads`, `agency`, and `full` presets.
 
@@ -287,7 +324,7 @@ Included in `leads`, `agency`, and `full` presets.
 
 ---
 
-### 5. `pmax` Module (8 tools)
+### 4.5 `pmax` Module (8 tools)
 
 Included in `ecommerce`, `agency`, and `full` presets.
 
@@ -304,7 +341,7 @@ Included in `ecommerce`, `agency`, and `full` presets.
 
 ---
 
-### 6. `shopping` Module (6 tools)
+### 4.6 `shopping` Module (6 tools)
 
 Included in `ecommerce` and `full` presets.
 
@@ -319,7 +356,7 @@ Included in `ecommerce` and `full` presets.
 
 ---
 
-### 7. `display` Module (5 tools)
+### 4.7 `display` Module (5 tools)
 
 Included in `full` preset (or via `--modules display`).
 
@@ -333,7 +370,7 @@ Included in `full` preset (or via `--modules display`).
 
 ---
 
-### 8. `demand-gen` Module (5 tools)
+### 4.8 `demand-gen` Module (5 tools)
 
 Included in `full` preset (or via `--modules demand-gen`).
 
@@ -347,7 +384,7 @@ Included in `full` preset (or via `--modules demand-gen`).
 
 ---
 
-### 9. `mcc` Module (11 tools)
+### 4.9 `mcc` Module (11 tools)
 
 Included in `agency` and `full` presets.
 
@@ -367,7 +404,7 @@ Included in `agency` and `full` presets.
 
 ---
 
-### 10. `operations` Module (68 guarded write & governance tools — opt-in only)
+### 4.10 `operations` Module (68 guarded write & governance tools — opt-in only)
 
 **Hidden from `tools/list` whenever `READ_ONLY_MODE=true`.** Only exposed when `READ_ONLY_MODE=false` and `operations` (or `--preset full`) is enabled. Every mutation requires `dry_run=true` first (`approval_id` returned) before `dry_run=false`. See [Write Safety Guarantees by Family](docs/compatibility-matrix.md#5-write-safety-guarantees-by-family-operations-module) for exact `validateOnly`, `state_verifier`, and `revert_operation` coverage per family.
 
@@ -382,7 +419,7 @@ Included in `agency` and `full` presets.
 
 ---
 
-## MCP Prompts & Resources
+## 5. MCP Prompts & Resources
 
 Clients that support MCP Prompts and Resources automatically receive:
 
@@ -402,7 +439,7 @@ Clients that support MCP Prompts and Resources automatically receive:
 
 ---
 
-## Customizable Analysis Profiles (Markdown + TOML)
+## 6. Customizable Analysis Profiles (Markdown + TOML)
 
 Built-in profiles are packaged inside the wheel (`agency/builtin_profiles/` + `config/profiles/`) so they work even when installed via `pip`/`uvx` outside a git checkout:
 - **`leads-audit`** (`.toml` + `.md`): Lead-gen Search audit covering conversion goals, primary vs. secondary separation, delivery, pacing, wasted search terms, and Quality Score.
@@ -415,7 +452,7 @@ Built-in profiles are packaged inside the wheel (`agency/builtin_profiles/` + `c
 
 ---
 
-## CLI Commands & Scheduled Alerts
+## 7. CLI Commands & Scheduled Alerts
 
 The lightweight CLI dispatcher (`google_ads_cli.py`) powers all subcommands without pre-importing the server or `.env` before managed profile initialization:
 
@@ -447,7 +484,7 @@ google-ads-mcp-server alerts --demo --profile leads-audit --format json
 
 ---
 
-## Data Accuracy, Truncation & Safety Architecture
+## 8. Data Accuracy, Truncation & Safety Architecture
 
 - **Account time zone & closed days:** Reporting and diagnostic tools resolve date windows in each account's `customer.time_zone` (with `tzdata` on Windows) and exclude the current incomplete day by default (`complete_days_only=True`). Every response includes `currency_code`, `time_zone`, `queried_at_utc`, and `conversion_lag_warning` when the window ends within the last 3 days.
 - **No silent truncation or false-positive absence alerts:** Bounded searches cap pagination at `GOOGLE_ADS_MAX_SEARCH_ROWS` (default `2000`) and propagate `truncated`, `totals_are_partial`, `truncated_queries`, `truncation_warning`, and `coverage_complete: false`. Absence-based alerts (`SMART_BIDDING_WITHOUT_EFFECTIVE_ACTIONS`, `PRIMARY_ACTION_NO_VOLUME`, `NO_RECENT_OFFLINE_UPLOADS`, `NO_APPROVED_BILLING_SETUP`) automatically downgrade to `insufficient_data` whenever their backing query is truncated (or an optional goal/summary query fails).
@@ -457,7 +494,7 @@ google-ads-mcp-server alerts --demo --profile leads-audit --format json
 
 ---
 
-## Client Compatibility & Self-Hosted HTTP
+## 9. Client Compatibility & Self-Hosted HTTP
 
 - **Desktop `stdio` (primary v1.0 path):** Config generation and `stdio` MCP handshakes are automated for Claude Desktop, Claude Code, Codex, Antigravity, Gemini CLI, and generic desktop hosts (Cursor, VS Code, Cherry Studio, Cline, Kimi CLI). Desktop `.mcpb` bundling is **planned** (not yet built). See [Compatibility Matrix](docs/compatibility-matrix.md) for verified status per client, channel coverage, API boundaries, and per-family write guarantees.
 - **Self-hosted Remote & Hosted Beta (`Streamable HTTP` + OAuth):**
@@ -466,7 +503,7 @@ google-ads-mcp-server alerts --demo --profile leads-audit --format json
 
 ---
 
-## Development & Documentation
+## 10. Development & Documentation
 
 - [Compatibility Matrix (AI Apps, Channels, API Limits, Write Guarantees)](docs/compatibility-matrix.md)
 - [Guía rápida y playbooks por rol (Español)](docs/es/README.md) | [Guía de conexión (Español)](docs/connect.md)

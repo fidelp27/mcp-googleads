@@ -272,7 +272,7 @@ def test_dockerfile_defaults_to_loopback_and_dockerignore_keeps_required_files()
         "google_ads_token.json",
         "tmp/roadmap-v2-auditoria/doc.docx",
         "tests/test_audit_fixes.py",
-        "analisis-conversiones-carbray.md",
+        "analisis-cliente-ejemplo.md",
     ):
         assert is_ignored(excluded), f".dockerignore must exclude {excluded}"
 
