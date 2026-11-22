@@ -102,6 +102,75 @@ Supported `--client` targets: `claude-desktop`, `claude-code`, `codex`, `antigra
 
 Managed profiles **always** launch with `READ_ONLY_MODE=true` and scope access strictly to the authorized customer IDs (plus manager ID if configured).
 
+### Manual Claude Desktop config (fallback)
+
+If you prefer to edit `claude_desktop_config.json` by hand instead of using `connect` / `register`, open it from Claude Desktop → *Settings → Developer → Edit Config* and paste a block like this under `mcpServers` (edit paths and IDs):
+
+**Windows**
+
+```json
+{
+  "mcpServers": {
+    "google-ads": {
+      "command": "uvx",
+      "args": ["google-ads-mcp-server", "--transport", "stdio", "--preset", "core"],
+      "env": {
+        "GOOGLE_ADS_AUTH_TYPE": "oauth",
+        "GOOGLE_ADS_CLIENT_ID": "YOUR_OAUTH_CLIENT_ID",
+        "GOOGLE_ADS_CLIENT_SECRET": "YOUR_OAUTH_CLIENT_SECRET",
+        "GOOGLE_ADS_TOKEN_PATH": "C:\\Users\\YOU\\.google-ads\\token.json",
+        "GOOGLE_ADS_DEVELOPER_TOKEN": "YOUR_DEVELOPER_TOKEN",
+        "GOOGLE_ADS_LOGIN_CUSTOMER_ID": "1234567890",
+        "ALLOWED_CUSTOMER_IDS": "1234567890,0987654321",
+        "READ_ONLY_MODE": "true",
+        "OPERATOR_NAME": "you"
+      }
+    }
+  }
+}
+```
+
+**macOS / Linux**
+
+```json
+{
+  "mcpServers": {
+    "google-ads": {
+      "command": "uvx",
+      "args": ["google-ads-mcp-server", "--transport", "stdio", "--preset", "core"],
+      "env": {
+        "GOOGLE_ADS_AUTH_TYPE": "oauth",
+        "GOOGLE_ADS_CLIENT_ID": "YOUR_OAUTH_CLIENT_ID",
+        "GOOGLE_ADS_CLIENT_SECRET": "YOUR_OAUTH_CLIENT_SECRET",
+        "GOOGLE_ADS_TOKEN_PATH": "/Users/you/.google-ads/token.json",
+        "GOOGLE_ADS_DEVELOPER_TOKEN": "YOUR_DEVELOPER_TOKEN",
+        "GOOGLE_ADS_LOGIN_CUSTOMER_ID": "1234567890",
+        "ALLOWED_CUSTOMER_IDS": "1234567890,0987654321",
+        "READ_ONLY_MODE": "true",
+        "OPERATOR_NAME": "you"
+      }
+    }
+  }
+}
+```
+
+`uvx` auto-installs the package on first run (requires [`uv`](https://docs.astral.sh/uv/)). If you prefer pipx: replace `"command": "uvx"` with `"command": "google-ads-mcp-server"` and drop `google-ads-mcp-server` from `args`, after `pipx install google-ads-mcp-server`.
+
+**Zero-credential demo** (no Google Cloud project needed):
+
+```json
+{
+  "mcpServers": {
+    "google-ads-demo": {
+      "command": "uvx",
+      "args": ["google-ads-mcp-server", "--transport", "stdio", "--demo", "--preset", "ecommerce"]
+    }
+  }
+}
+```
+
+After editing, fully quit and reopen Claude Desktop so it picks up the new server.
+
 ---
 
 ## Modular Tool Catalog & Presets (`--preset` / `--modules`)

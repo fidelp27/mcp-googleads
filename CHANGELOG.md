@@ -1,0 +1,60 @@
+# Changelog
+
+All notable changes to `google-ads-mcp-server` are documented here.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/).
+
+## [0.2.0] - 2026-11-22
+
+First public PyPI release. Major expansion of the modular catalog, governance,
+and remote multi-tenant pilot.
+
+### Added
+
+- **Modular tool catalog** with 10 domain modules and 5 presets
+  (`core`, `leads`, `ecommerce`, `agency`, `full`) — only 25 `core` tools load
+  by default to keep LLM context manageable. All 68 `operations` write tools
+  stay excluded from `tools/list` while `READ_ONLY_MODE=true`.
+- **`--demo` zero-credential mode** for Claude Desktop, Claude Code, Codex,
+  Antigravity, Gemini CLI, and generic MCP clients.
+- **`connect` / `doctor` / `register` CLI** to onboard real Google Ads
+  accounts over browser OAuth and register the saved profile into each
+  supported desktop AI client.
+- **Diagnostics module**: `get_impression_share_losses`,
+  `get_ad_strength_diagnostics`, `get_auction_insights`,
+  `check_consent_signal_coverage`.
+- **Measurement module**: `get_enhanced_conversions_status`, offline
+  conversions upload (clicks, calls, adjustments).
+- **Search module**: Keyword Planner tools, search terms clustering with
+  negative suggestions.
+- **Demand Gen family**: campaign, ad group, and read tools (v25 API).
+- **Experiments module**: Drafts & Experiments tools (v25 Experiment API).
+- **MCC module**: `mcc_bulk_apply` for cross-client mutations under a single
+  approval; multi-account currency-separated agency dashboard.
+- **Customer Match** membership management tools.
+- **Governance**: file-based multi-operator resource locking,
+  `list_expiring_approvals`, diff preview on every `dry_run`, structured
+  `GoogleAdsError` with parsed API envelope, audit log export + rotation.
+- **Remote pilot gateway** (`[remote]` extras) with OAuth JWT validation,
+  per-tenant worker isolation, Fernet-encrypted refresh tokens, PKCE
+  self-serve flow, and idempotent disconnect/revocation.
+- **Customizable analysis profiles** (Markdown + TOML), built-in profiles
+  packaged in the wheel: `leads-audit`, `ecommerce-audit`, `agency-weekly`.
+- **Reporting resolvers**: geo targets, ad group and ad IDs, UTM runbook.
+- Support for `final_url_suffix` and `tracking_url_template` on
+  `update_campaign`.
+
+### Changed
+
+- Reports now brand as Clariola by default (overridable via
+  `config/branding.json`).
+- Google Ads API default pinned to `v25`.
+
+### Fixed
+
+- Recommendation query no longer selects the unselectable
+  `impact.base_metrics.impressions` field.
+
+## [0.1.0] - 2025-07-15
+
+Initial internal release.

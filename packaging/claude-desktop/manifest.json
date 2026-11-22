@@ -1,0 +1,40 @@
+{
+  "manifest_version": "0.4",
+  "name": "google-ads-mcp",
+  "display_name": "Google Ads MCP",
+  "version": "0.2.0",
+  "description": "Read-only Google Ads audits, campaign reports, and conversion diagnostics. Includes a demo with synthetic data.",
+  "author": {"name": "Fidel Parabacuto"},
+  "repository": {"type": "git", "url": "https://github.com/fidelp27/mcp-googleads"},
+  "support": "https://github.com/fidelp27/mcp-googleads/issues",
+  "license": "MIT",
+  "compatibility": {"platforms": ["win32", "darwin"]},
+  "server": {
+    "type": "uv",
+    "entry_point": "desktop.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--project", "${__dirname}", "${__dirname}/desktop.py"],
+      "env": {
+        "GOOGLE_ADS_DESKTOP_MODE": "${user_config.mode}",
+        "GOOGLE_ADS_DESKTOP_PROFILE": "${user_config.profile_path}"
+      }
+    }
+  },
+  "user_config": {
+    "mode": {
+      "type": "string",
+      "title": "Mode",
+      "description": "Use demo for synthetic data, or account after authorizing your own Google Ads profile.",
+      "default": "demo",
+      "required": true
+    },
+    "profile_path": {
+      "type": "file",
+      "title": "Google Ads profile",
+      "description": "Optional. Select the profile.json created by the Google Ads MCP connect command to override its default path.",
+      "required": false
+    }
+  },
+  "tools_generated": true
+}
