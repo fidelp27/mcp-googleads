@@ -6,7 +6,7 @@ An open-source, **read-only-by-default** **Model Context Protocol (MCP)** server
 
 Ships **142 structured tools** across **10 modular domains** with **5 one-word presets**, **editable Markdown + TOML analysis profiles**, **account-timezone & truncation-safe analytics**, **multi-currency / multi-MCC orchestration**, and a **guarded write engine with human-in-the-loop approvals**.
 
-[![PyPI](https://img.shields.io/pypi/v/google-ads-mcp-server.svg)](https://pypi.org/project/google-ads-mcp-server/) [![Python](https://img.shields.io/pypi/pyversions/google-ads-mcp-server.svg)](https://pypi.org/project/google-ads-mcp-server/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PyPI](https://img.shields.io/pypi/v/google-ads-mcp-server.svg)](https://pypi.org/project/google-ads-mcp-server/) [![Python](https://img.shields.io/pypi/pyversions/google-ads-mcp-server.svg)](https://pypi.org/project/google-ads-mcp-server/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Sponsor](https://img.shields.io/badge/❤-Sponsor-ff69b4)](https://github.com/sponsors/fidelp27)
 
 ---
 
