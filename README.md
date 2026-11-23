@@ -459,8 +459,9 @@ python -m pytest -q
 and you'd like to say thanks, any contribution helps keep it maintained:
 
 - [**❤ Sponsor on GitHub**](https://github.com/sponsors/fidelp27) — any amount,
-  one-time or monthly.
-- **Argentina (Mercado Pago):** link coming soon.
+  one-time or monthly (USD, via Stripe).
+- [**Mercado Pago (Argentina)**](https://link.mercadopago.com.ar/fidelp27) —
+  donar en pesos.
 
 No tiers, no perks — just support if you feel like it.
 

@@ -1,8 +1,4 @@
 # https://docs.github.com/sponsors/receiving-sponsorships-through-github-sponsors/configuring-the-github-sponsors-button
 github: fidelp27
-
-# Argentina: Mercado Pago donation link.
-# Create one at https://www.mercadopago.com.ar/cobro-en-linea/ (Link de Cobro),
-# then uncomment the two lines below and paste the mpago.la/... URL.
-# custom:
-#   - https://mpago.la/YOUR_LINK_HERE
+custom:
+  - https://link.mercadopago.com.ar/fidelp27
