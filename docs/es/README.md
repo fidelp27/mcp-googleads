@@ -15,6 +15,11 @@ google-ads-mcp-server register --client claude-desktop --demo
 
 El modo `--demo` incluye dos cuentas sintéticas realistas (`1111111111` ecommerce en `EUR` y `2222222222` B2B Leads en `USD`) con campañas Search y PMax, gasto desperdiciado, objetivos de conversión y alertas.
 
+> **¿No sabés qué preguntarle?** Mirá
+> [**¿Qué puedo preguntarle? — Prompts de ejemplo por alcance y nivel**](que-puedo-preguntar.md)
+> para una guía en lenguaje simple por caso de uso (ecommerce, leads, agencia,
+> usuario avanzado).
+
 ---
 
 ## 2. Conectar cuentas reales (`connect` + `doctor`)

@@ -74,6 +74,11 @@ Restart the client after registration. Then try one of these examples:
 - *"Diagnose delivery issues, budget pacing, and wasted search terms on account `1111111111`."*
 - *"Run `get_pmax_diagnostics` and `get_shopping_performance` on account `1111111111`."*
 
+> **New to Google Ads or not sure what you can ask?** See
+> [**What Can I Ask? — Example Prompts by Scope & Level**](docs/what-can-i-ask.md)
+> for a plain-language guide organized by use case (ecommerce, leads, agency,
+> power user).
+
 ### B. Connect a real Google Ads account
 
 1. Enable the **Google Ads API** in your own Google Cloud project. For live accounts, request [Explorer access or higher](https://developers.google.com/google-ads/api/docs/api-policy/access-levels#explorer_access_level) for that project.
