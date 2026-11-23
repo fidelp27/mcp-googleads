@@ -453,6 +453,20 @@ pip install -e ".[dev]"
 python -m pytest -q
 ```
 
+## Support the project
+
+`google-ads-mcp-server` is free and open source (MIT). If it saves you time or
+budget on Google Ads audits, consider supporting ongoing development:
+
+- [**❤ Sponsor on GitHub**](https://github.com/sponsors/fidelp27) — one-time or
+  monthly, in USD via Stripe.
+- **Argentina (Mercado Pago):** link coming soon. In the meantime reach out via
+  [GitHub Issues](https://github.com/fidelp27/mcp-googleads/issues) if you want
+  to donate in ARS.
+
+Sponsors get early access to new analysis profiles (SaaS, DTC e-commerce,
+regulated verticals) and priority triage on GitHub Issues.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
