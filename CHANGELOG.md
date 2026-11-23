@@ -4,6 +4,22 @@ All notable changes to `google-ads-mcp-server` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.5] - 2026-11-23
+
+### Security / Hygiene
+
+- Replaced a specific 10-digit `customer_id` example that had been
+  hardcoded in every write-tool docstring (10 occurrences in
+  `google_ads_server.py`) and in four test fixtures with the generic
+  placeholder `1234567890` / `123-456-7890`. Previous releases 0.2.0 –
+  0.2.4 shipped the specific ID as the "Example" value exposed to MCP
+  clients in `tools/list` schemas.
+- `.gitignore` now excludes `analisis-*.md` and `keyword-research-*.md`
+  so local private research notes cannot be accidentally committed
+  with `git add .`.
+
+No behavioral or API changes.
+
 ## [0.2.4] - 2026-11-23
 
 ### Changed

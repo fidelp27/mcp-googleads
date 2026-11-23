@@ -7,7 +7,7 @@ import pytest
 from agency.mutations import execute_mutation
 
 
-CUSTOMER_ID = "9873186703"
+CUSTOMER_ID = "1234567890"
 OPERATIONS = [{"create": {"name": "Launch campaign budget"}}]
 
 

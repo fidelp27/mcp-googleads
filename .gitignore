@@ -60,3 +60,7 @@ generated/
 data/
 output/
 tmp/
+
+# Private research notes (never ship, never track)
+analisis-*.md
+keyword-research-*.md

@@ -14,8 +14,8 @@ from agency.mutations import execute_mutation
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("9873186703", "9873186703"),
-        ("987-318-6703", "9873186703"),
+        ("1234567890", "1234567890"),
+        ("123-456-7890", "1234567890"),
     ],
 )
 def test_normalize_customer_id_accepts_valid(raw, expected):
@@ -30,18 +30,18 @@ def test_normalize_customer_id_rejects_invalid(raw):
 
 def test_ensure_customer_allowed_permits_when_whitelist_empty(agency_data, monkeypatch):
     monkeypatch.delenv("ALLOWED_CUSTOMER_IDS", raising=False)
-    assert ensure_customer_allowed("987-318-6703") == "9873186703"
+    assert ensure_customer_allowed("123-456-7890") == "1234567890"
 
 
 def test_ensure_customer_allowed_permits_whitelisted(agency_data, monkeypatch):
-    monkeypatch.setenv("ALLOWED_CUSTOMER_IDS", "9873186703, 1111111111")
-    assert ensure_customer_allowed("9873186703") == "9873186703"
+    monkeypatch.setenv("ALLOWED_CUSTOMER_IDS", "1234567890, 1111111111")
+    assert ensure_customer_allowed("1234567890") == "1234567890"
 
 
 def test_ensure_customer_allowed_rejects_non_whitelisted(agency_data, monkeypatch):
     monkeypatch.setenv("ALLOWED_CUSTOMER_IDS", "1111111111")
     with pytest.raises(PermissionError):
-        ensure_customer_allowed("9873186703")
+        ensure_customer_allowed("1234567890")
 
 
 def test_read_only_mode_blocks_write_tools(agency_data, monkeypatch):
@@ -74,7 +74,7 @@ def test_non_whitelisted_customer_blocks_mutation(agency_data, monkeypatch):
     with pytest.raises(PermissionError):
         execute_mutation(
             tool_name="pause_campaign",
-            customer_id="9873186703",
+            customer_id="1234567890",
             service="campaigns",
             operations=[{"update": {}, "updateMask": "status"}],
             dry_run=True,
@@ -99,7 +99,7 @@ def test_budget_cap_blocks_amount_over_limit(agency_data, monkeypatch):
         create_budget = server.mcp._tool_manager.get_tool("create_campaign_budget").fn
         with pytest.raises(PermissionError):
             create_budget(
-                customer_id="9873186703",
+                customer_id="1234567890",
                 name="Over cap",
                 amount_micros=5_000_000,
                 dry_run=True,
@@ -126,7 +126,7 @@ def test_budget_within_cap_is_validated(agency_data, monkeypatch):
     try:
         create_budget = server.mcp._tool_manager.get_tool("create_campaign_budget").fn
         create_budget(
-            customer_id="9873186703",
+            customer_id="1234567890",
             name="Within cap",
             amount_micros=1_000_000,
             dry_run=True,
