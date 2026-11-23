@@ -4,6 +4,20 @@ All notable changes to `google-ads-mcp-server` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.4] - 2026-11-23
+
+### Changed
+
+- README: added a `Support the project` section (GitHub Sponsors +
+  Mercado Pago for Argentine donors) and a small `❤ Sponsor` badge
+  next to the PyPI / Python / License badges.
+- `.github/FUNDING.yml`: enables the ❤ Sponsor button on the repo
+  with GitHub Sponsors (`fidelp27`) and Mercado Pago as a custom
+  donation link.
+
+Docs-only release — no changes to tools, API surface, or runtime
+behavior.
+
 ## [0.2.3] - 2026-11-22
 
 ### Changed
